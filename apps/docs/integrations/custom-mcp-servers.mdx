@@ -48,6 +48,20 @@ real credentials per request. This means:
   and a task cannot run an **Always ask** tool until its session owner allows
   that exact call.
 
+## Test a remote connection
+
+After saving a remote server, open **Manage tools** on **Integrations** (or in
+Personal Settings for a private server), then select **Test connection**. Each
+test makes a fresh request using the saved URL and authentication and reports
+whether Roomote can retrieve the server's tool catalog. A server with no tools
+can still pass the connection test.
+
+If a test fails, review the displayed error, correct the server's settings or
+reconnect OAuth if needed, and test again. Testing does not execute any tool,
+change tool approval choices, or enable the server. It checks the remote
+connection from Roomote, not execution inside a task sandbox. Local stdio
+servers must be checked in a sandbox instead.
+
 ## OAuth
 
 For servers that support the MCP authorization spec, pick **OAuth** and use

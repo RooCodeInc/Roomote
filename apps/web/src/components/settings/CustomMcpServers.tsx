@@ -785,13 +785,34 @@ function CustomToolManagementDialog({
       setRetryError((current) => (current === error ? null : current));
     }
   };
+  const testConnection = async () => {
+    if (!server || toolsQuery.isFetching) return;
+    const result = await toolsQuery.refetch({ cancelRefetch: false });
+    if (result.isError) {
+      toast.error(`Connection test failed for ${server.name}.`);
+    } else if (result.isSuccess) {
+      toast.success(`Connection test passed for ${server.name}.`);
+    }
+  };
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent size="2xl">
         <DialogHeader className="pr-6">
-          <DialogTitle>
-            Manage tools for {server?.name ?? 'integration'}
-          </DialogTitle>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <DialogTitle>
+              Manage tools for {server?.name ?? 'integration'}
+            </DialogTitle>
+            <Button
+              variant="outline"
+              size="sm"
+              aria-label={`Test ${server?.name ?? 'integration'} connection`}
+              aria-busy={toolsQuery.isFetching}
+              disabled={toolsQuery.isFetching}
+              onClick={() => void testConnection()}
+            >
+              {toolsQuery.isFetching ? 'Testing…' : 'Test connection'}
+            </Button>
+          </div>
           <DialogDescription>
             Choose how the model can use tools from this integration.
           </DialogDescription>
