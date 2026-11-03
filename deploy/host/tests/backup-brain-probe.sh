@@ -203,6 +203,7 @@ if [ -e "$bundle" ]; then
   printf 'failed encryption published a partial backup at the final output path\n' >&2
   exit 1
 fi
+grep -q 'File size limit exceeded' "$work_dir/output-failure.log"
 if compgen -G "$install_root/backups/.roomote-backup.*" >/dev/null; then
   printf 'failed encryption left a temporary encrypted output behind\n' >&2
   exit 1
@@ -212,6 +213,7 @@ env PATH="$fake_bin:$PATH" MOCK_PROBE_MODE=present \
   "$roomote_cli" backup --passphrase-file "$passphrase_file" --output "$bundle" \
   >"$work_dir/output-retry.log" 2>&1
 inspect_bundle "$bundle" "$work_dir/output-inspection"
+test "$(stat -c '%a' "$bundle")" = '600'
 cmp "$install_root/caddy/Caddyfile" "$work_dir/output-inspection/config/caddy/Caddyfile"
 (cd "$work_dir/output-inspection" && sha256sum -c SHA256SUMS >/dev/null)
 cp "$bundle" "$work_dir/completed-backup"

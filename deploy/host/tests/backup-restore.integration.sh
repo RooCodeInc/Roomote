@@ -139,6 +139,7 @@ if [ -e "$bundle" ]; then
   printf 'failed encryption published a partial backup\n' >&2
   exit 1
 fi
+grep -q 'File size limit exceeded' "$work_dir/failed-encryption.log"
 if compgen -G "$source_root/backups/.roomote-backup.*" >/dev/null; then
   printf 'failed encryption left temporary encrypted output behind\n' >&2
   exit 1
