@@ -40,12 +40,17 @@ const {
   fastTaskQueryState: { data: null as unknown },
   searchParamsState: { value: '' },
   routerReplaceMock: vi.fn(),
-  artifactQueryState: { dataByPath: {} as Record<string, unknown> },
+  artifactQueryState: {
+    dataByPath: {} as Record<string, unknown>,
+    failedPaths: new Set<string>(),
+    pendingRead: null as Promise<void> | null,
+  },
   artifactQueryInputs: [] as Array<{
     taskId?: string;
     sessionId?: string;
     path: string;
     version?: number;
+    preview?: boolean;
   }>,
   disabledTaskPrompts: new Set<string>(),
 }));
@@ -100,12 +105,19 @@ vi.mock('@/trpc/client', () => ({
             sessionId?: string;
             path: string;
             version?: number;
+            preview?: boolean;
           },
           options?: Record<string, unknown>,
         ) => ({
           queryKey: ['artifacts', 'byPath', input],
           queryFn: async () => {
             artifactQueryInputs.push(input);
+            if (!input.preview) {
+              await artifactQueryState.pendingRead;
+              if (artifactQueryState.failedPaths.has(input.path)) {
+                throw new Error('Artifact request failed');
+              }
+            }
             return (
               artifactQueryState.dataByPath[
                 `${input.taskId ?? input.sessionId}:${input.path}`
@@ -152,16 +164,19 @@ vi.mock('@/components/tasks/ArtifactViewerContent', () => ({
   ArtifactViewerContent: ({
     artifact,
     isLoading,
+    emptyMessage,
     onPreviousArtifact,
     onNextArtifact,
   }: {
     artifact: { path: string } | null;
     isLoading?: boolean;
+    emptyMessage?: ReactNode;
     onPreviousArtifact?: () => void;
     onNextArtifact?: () => void;
   }) => (
     <div data-loading={isLoading || undefined}>
       Artifact preview: {artifact?.path}
+      {!artifact && !isLoading ? emptyMessage : null}
       {onPreviousArtifact ? (
         <button type="button" onClick={onPreviousArtifact}>
           Previous artifact
@@ -439,6 +454,8 @@ describe('SessionWorkspace', () => {
     routerReplaceMock.mockClear();
     disabledTaskPrompts.clear();
     artifactQueryInputs.length = 0;
+    artifactQueryState.failedPaths.clear();
+    artifactQueryState.pendingRead = null;
     artifactQueryState.dataByPath = {
       'tmp/capture-visual-proof/sidebar-alignment.png': {
         id: 'artifact-image',
@@ -1705,6 +1722,104 @@ describe('SessionWorkspace', () => {
     expect(
       screen.getByRole('button', { name: 'Open Decision from Session' }),
     ).toBeVisible();
+  });
+
+  it.each(['session', 'task'] as const)(
+    'recovers a failed %s artifact read in place using the same owner, path and version',
+    async (ownerKind) => {
+      const artifact = {
+        id: 'retry-artifact',
+        path: 'plans/retry.md',
+        version: 2,
+        artifactType: 'general' as const,
+        contentType: 'text/markdown',
+        size: 100,
+        createdAt: new Date('2026-01-05T00:00:00Z'),
+      };
+      artifactQueryState.dataByPath[artifact.path] = artifact;
+      artifactQueryState.failedPaths.add(artifact.path);
+      renderWorkspace({
+        isMobile: false,
+        sessionOverride:
+          ownerKind === 'session'
+            ? { artifacts: [artifact] }
+            : { tasks: [{ ...singleTask, artifacts: [artifact] }] },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Artifacts' }));
+      fireEvent.click(screen.getByRole('button', { name: /^Open Retry from/ }));
+
+      const retry = await screen.findByRole('button', { name: 'Retry' });
+      expect(screen.getByText("Couldn't load this artifact.")).toBeVisible();
+      artifactQueryState.failedPaths.clear();
+      let finishRead!: () => void;
+      artifactQueryState.pendingRead = new Promise<void>((resolve) => {
+        finishRead = resolve;
+      });
+      fireEvent.click(retry);
+      await waitFor(() =>
+        expect(screen.getByText('Artifact preview:')).toHaveAttribute(
+          'data-loading',
+          'true',
+        ),
+      );
+      expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+      await act(async () => finishRead());
+
+      expect(
+        await screen.findByText(`Artifact preview: ${artifact.path}`),
+      ).toBeVisible();
+      const reads = artifactQueryInputs.filter(
+        (input) => input.path === artifact.path && !('preview' in input),
+      );
+      expect(reads).toHaveLength(2);
+      expect(reads[1]).toEqual({
+        ...(ownerKind === 'session'
+          ? { sessionId: 'session-1' }
+          : { taskId: 'task-1' }),
+        path: artifact.path,
+        version: 2,
+      });
+      expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Back to artifacts' }),
+      );
+      expect(screen.getByRole('heading', { name: 'Artifacts' })).toBeVisible();
+    },
+  );
+
+  it('keeps the matching cached artifact visible when a background read fails', async () => {
+    const artifact = {
+      id: 'cached-artifact',
+      path: 'plans/cached.md',
+      version: 1,
+      artifactType: 'general' as const,
+      contentType: 'text/markdown',
+      size: 100,
+      createdAt: new Date('2026-01-05T00:00:00Z'),
+    };
+    artifactQueryState.dataByPath[artifact.path] = artifact;
+    const { queryClient } = renderWorkspace({
+      isMobile: false,
+      sessionOverride: { artifacts: [artifact] },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Artifacts' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Open Cached from Session' }),
+    );
+    expect(
+      await screen.findByText(`Artifact preview: ${artifact.path}`),
+    ).toBeVisible();
+
+    artifactQueryState.failedPaths.add(artifact.path);
+    await act(async () => {
+      await queryClient.invalidateQueries({
+        queryKey: ['artifacts', 'byPath'],
+      });
+    });
+    expect(
+      screen.getByText(`Artifact preview: ${artifact.path}`),
+    ).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
   });
 
   it('shows artifacts created directly by the Session', async () => {

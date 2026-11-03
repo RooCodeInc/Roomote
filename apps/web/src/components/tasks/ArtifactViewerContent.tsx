@@ -1,7 +1,7 @@
 'use client';
 
 import { usePathname, useRouter } from 'next/navigation';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Streamdown, defaultRemarkPlugins } from 'streamdown';
 import remarkBreaks from 'remark-breaks';
@@ -132,7 +132,7 @@ interface ArtifactViewerContentProps {
   className?: string;
   showToolbar?: boolean;
   isLoading?: boolean;
-  emptyMessage?: string;
+  emptyMessage?: ReactNode;
   firstRowIsHeader?: boolean;
   onFirstRowIsHeaderChange?: (checked: boolean) => void;
   onPreviousArtifact?: () => void;
