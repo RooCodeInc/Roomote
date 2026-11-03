@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const state = vi.hoisted(() => ({
@@ -18,6 +18,10 @@ const state = vi.hoisted(() => ({
   searchDescription: null as string | null,
   policiesQueryEnabled: undefined as boolean | undefined,
   policiesUpdating: false,
+  policiesHasData: true,
+  policiesError: false,
+  policiesFetching: false,
+  refetchPolicies: vi.fn(),
 }));
 
 vi.mock('@/hooks/useIntegrationToolAutoApprovalsExperiment', () => ({
@@ -34,6 +38,10 @@ vi.mock('@/hooks/useIntegrationToolPolicies', () => ({
     state.policiesQueryEnabled = options?.enabled;
     return {
       isLoading: false,
+      hasData: state.policiesHasData,
+      isError: state.policiesError,
+      isFetching: state.policiesFetching,
+      refetch: state.refetchPolicies,
       isUpdating: state.policiesUpdating,
       modes: new Map(
         state.policies.map((policy) => [
@@ -98,8 +106,131 @@ describe('McpToolManagementDialog tool approvals', () => {
     state.setModesCalls = [];
     state.annotated = false;
     state.policiesUpdating = false;
+    state.policiesHasData = true;
+    state.policiesError = false;
+    state.policiesFetching = false;
+    state.refetchPolicies.mockReset();
     // Radix Select scrolls the highlighted option into view; jsdom lacks it.
     Element.prototype.scrollIntoView = vi.fn();
+  });
+
+  it('keeps the catalog readable without inventing approval choices during a cold read', () => {
+    state.policiesHasData = false;
+    state.policiesFetching = true;
+    renderDialog();
+
+    expect(screen.getByText('Web Search Exa')).toBeInTheDocument();
+    expect(
+      screen.getByRole('status', { name: 'Loading tool approval choices' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Always allow' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Retry/ })).toBeNull();
+  });
+
+  it('recovers a failed cold policy read in place and restores the saved choice', async () => {
+    state.policiesHasData = false;
+    state.policiesError = true;
+    let finishRead!: () => void;
+    state.refetchPolicies.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finishRead = resolve;
+        }),
+    );
+    const view = renderDialog();
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Unable to load tool approval choices.',
+    );
+    expect(screen.queryByRole('button', { name: 'Always allow' })).toBeNull();
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Retry loading tool approval choices',
+      }),
+    );
+    expect(state.refetchPolicies).toHaveBeenCalledTimes(1);
+    expect(
+      screen.getByRole('button', {
+        name: 'Retry loading tool approval choices',
+      }),
+    ).toBeDisabled();
+    // TanStack clears the cold error while refetching. Keep Retry visible and
+    // disabled through that interval rather than replacing it with a skeleton.
+    state.policiesError = false;
+    state.policiesFetching = true;
+    view.rerender(
+      <McpToolManagementDialog
+        mcpId="exa"
+        integrationName="Exa"
+        open
+        onOpenChange={() => {}}
+      />,
+    );
+    expect(screen.getByRole('alert')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', {
+        name: 'Retry loading tool approval choices',
+      }),
+    ).toBeDisabled();
+
+    state.policiesHasData = true;
+    state.policiesFetching = false;
+    state.policies = [
+      { integrationId: 'exa', toolName: 'web_search_exa', mode: 'ask' },
+    ];
+    await act(async () => finishRead());
+
+    expect(screen.queryByRole('alert')).toBeNull();
+    const search = within(
+      screen.getByRole('group', { name: 'Approval mode for web_search_exa' }),
+    );
+    expect(search.getByRole('button', { name: 'Always ask' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    fireEvent.click(search.getByRole('button', { name: 'Disable' }));
+    expect(state.setModeCalls).toEqual([
+      { integrationId: 'exa', toolName: 'web_search_exa', mode: 'reject' },
+    ]);
+  });
+
+  it('retains cached choices but pauses both group and per-tool editing after a failed refresh', () => {
+    state.policiesError = true;
+    state.policies = [
+      { integrationId: 'exa', toolName: 'web_search_exa', mode: 'ask' },
+    ];
+    renderDialog();
+
+    const search = within(
+      screen.getByRole('group', { name: 'Approval mode for web_search_exa' }),
+    );
+    expect(search.getByRole('button', { name: 'Always ask' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    for (const name of ['Always allow', 'Always ask', 'Disable']) {
+      for (const button of screen.getAllByRole('button', { name })) {
+        expect(button).toBeDisabled();
+        fireEvent.click(button);
+      }
+    }
+    expect(state.setModeCalls).toEqual([]);
+    expect(state.setModesCalls).toEqual([]);
+    expect(
+      screen.getByRole('button', {
+        name: 'Retry loading tool approval choices',
+      }),
+    ).toBeEnabled();
+  });
+
+  it('does not show policy loading or errors to a viewer who cannot manage them', () => {
+    state.policiesHasData = false;
+    state.policiesError = true;
+    renderDialog({ isAdmin: false });
+    expect(screen.getByText('Web Search Exa')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(screen.queryByRole('button', { name: /Retry/ })).toBeNull();
   });
 
   it('shows the approval choices with no experiment, a default tool as Always allow while Auto is off', () => {
