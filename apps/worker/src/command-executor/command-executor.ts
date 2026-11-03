@@ -356,14 +356,52 @@ export class CommandExecutor {
       console.log(`${tag} ${cmdLine}`);
     }
 
-    return execa(cmdLine, {
+    // A shell can exit before its descendants close their inherited pipes.
+    // Isolate foreground work so its deadline can terminate the whole group,
+    // including children left behind by an already-exited shell.
+    const controller = new AbortController();
+    const subprocess = execa(cmdLine, {
       shell: '/bin/bash',
       cwd: workingDir,
       extendEnv: false,
       env,
       stdin: 'ignore',
-      timeout: command.timeout * 1000,
+      detached: true,
+      cancelSignal: controller.signal,
     });
+    const signalGroup = (signal: NodeJS.Signals) => {
+      if (!subprocess.pid) return;
+      try {
+        process.kill(-subprocess.pid, signal);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') {
+          console.warn(`Failed to ${signal} command process group`, error);
+        }
+      }
+    };
+    let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
+    const timeoutMs = command.timeout * 1000;
+    const timeoutTimer =
+      timeoutMs > 0
+        ? setTimeout(() => {
+            controller.abort();
+            signalGroup('SIGTERM');
+            forceKillTimer = setTimeout(() => signalGroup('SIGKILL'), 5_000);
+          }, timeoutMs)
+        : undefined;
+
+    try {
+      return await subprocess;
+    } catch (error) {
+      if (controller.signal.aborted && error instanceof ExecaError) {
+        error.shortMessage = `Command timed out after ${timeoutMs} milliseconds: ${cmdLine}`;
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeoutTimer);
+      clearTimeout(forceKillTimer);
+      if (controller.signal.aborted) signalGroup('SIGKILL');
+    }
   }
 
   private async sleep(ms: number): Promise<void> {
