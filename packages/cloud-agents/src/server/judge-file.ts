@@ -48,6 +48,7 @@ function judgeFileQuestion(
  * closed-set Choice answers.
  */
 export async function evaluateJudgeFileCriteria(input: {
+  taskId?: string;
   state: JudgeFileState;
   criteria: JudgeCriterionInput[];
   timeoutMs?: number;
@@ -60,6 +61,7 @@ export async function evaluateJudgeFileCriteria(input: {
   ) as Record<string, TypeSafeChoiceQuestion<JudgeOutcome>>;
 
   const answers = await evaluateDecisionModel({
+    taskId: input.taskId,
     state: {
       ...input.state,
       criteria: input.criteria,
@@ -94,7 +96,10 @@ export async function evaluateJudgeFileCriteria(input: {
 }
 
 /** Shared Judgement protocol; credentials and model selection stay on the API. */
-export async function evaluateRepositoryJudgement(request: JudgeRequest) {
+export async function evaluateRepositoryJudgement(
+  request: JudgeRequest,
+  taskId?: string,
+) {
   const questions = { result: question(request) };
   if (
     Buffer.byteLength(JSON.stringify({ state: request, questions })) >
@@ -103,6 +108,7 @@ export async function evaluateRepositoryJudgement(request: JudgeRequest) {
     throw new Error('Judgement evidence exceeds the request budget');
   }
   const answers = await evaluateDecisionModel({
+    taskId,
     state: request,
     questions,
     timeoutMs: 2500,

@@ -944,6 +944,14 @@ export const tasks = pgTable(
 
     harnessSessionId: text('harness_session_id'), // Assigned by Harness.
 
+    // Lifetime admission state, deliberately not reset by a new run/resume.
+    inferenceRequestLimit: integer('inference_request_limit')
+      .notNull()
+      .default(1000),
+    inferenceRequests: integer('inference_requests').notNull().default(0),
+    safetyStoppedAt: timestamp('safety_stopped_at'),
+    safetyStopReason: text('safety_stop_reason'),
+
     // Inference provider that served this task's LLM, paired with `model`.
     // Renamed from the ambiguous `provider` (this deployment also has
     // source-control, communication, and compute providers).

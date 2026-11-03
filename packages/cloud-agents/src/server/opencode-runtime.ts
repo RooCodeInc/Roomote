@@ -7,6 +7,10 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import {
+  asRecord,
+  CHATGPT_GATEWAY_PROVIDER_ID,
+  buildInferenceGatewayOpenCodeBaseUrl,
+  getInferenceGatewayProvider,
   collectOpenRouterVariantModelAlias,
   CHATGPT_FAST_MODE_ENV_VAR_NAME,
   DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
@@ -678,6 +682,16 @@ export function buildOpenCodeCliEnv(
     options,
   );
 
+  if (
+    extraEnv?.ROOMOTE_TASK_INFERENCE_GATEWAY &&
+    extraEnv.ROOMOTE_TASK_INFERENCE_TOKEN
+  ) {
+    env.OPENCODE_CONFIG_CONTENT = rebaseTaskHelperInference(
+      env.OPENCODE_CONFIG_CONTENT,
+      extraEnv,
+    );
+  }
+
   // Do not inherit or accept disabled-provider credentials in helper model
   // processes, including callers that bypass the task dequeue path.
   for (const envVarName of DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES) {
@@ -695,6 +709,51 @@ export function buildOpenCodeCliEnv(
   scrubOpenCodeHelperEnv(env, extraEnv);
 
   return env;
+}
+
+/** Task-associated control-plane helpers use the same admission boundary as
+ * sandbox children. Dedicated leases prevent cross-task credential/config reuse. */
+export function rebaseTaskHelperInference(
+  content: string,
+  env: Partial<Record<string, string | undefined>>,
+): string {
+  const config = JSON.parse(content) as Record<string, unknown>;
+  const providers = asRecord(config.provider) ?? {};
+  const ids = new Set<string>();
+  for (const model of [config.model, config.small_model]) {
+    if (typeof model === 'string') ids.add(model.split('/')[0]!);
+  }
+  // Only the selected helper model is needed; exclude ambient role models.
+  const selected = env.R_MODEL?.split('/')[0];
+  if (selected) ids.add(selected);
+  for (const id of ids) {
+    const routeId =
+      id === 'openai' && env.R_INFERENCE_GATEWAY_CHATGPT === '1'
+        ? CHATGPT_GATEWAY_PROVIDER_ID
+        : id;
+    const provider = getInferenceGatewayProvider(routeId);
+    if (!provider)
+      throw new Error(
+        `Task helper provider ${id} has no admission-controlled gateway`,
+      );
+    const existing = asRecord(providers[id]) ?? {};
+    providers[id] = {
+      ...existing,
+      options: {
+        ...asRecord(existing.options),
+        baseURL: buildInferenceGatewayOpenCodeBaseUrl(
+          env.ROOMOTE_TASK_INFERENCE_GATEWAY!,
+          provider,
+        ),
+        apiKey: env.ROOMOTE_TASK_INFERENCE_TOKEN,
+      },
+    };
+  }
+  return JSON.stringify({
+    ...config,
+    provider: Object.fromEntries([...ids].map((id) => [id, providers[id]])),
+    enabled_providers: [...ids],
+  });
 }
 
 function shellEscape(value: string): string {

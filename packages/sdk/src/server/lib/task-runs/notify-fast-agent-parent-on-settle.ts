@@ -13,6 +13,7 @@ import {
   recordTaskRunLifecycleEvent,
   sql,
   taskRuns,
+  tasks,
 } from '@roomote/db/server';
 import { listFastAgentPullRequestContexts } from '../fast-agent-parent-event';
 import { enqueueFastAgentParentEvent } from '../fast-agent-parent-event-queue';
@@ -61,6 +62,11 @@ export async function notifyFastAgentParentOnSettle(
   if (!parent) {
     return 'not_applicable';
   }
+  const taskSafety = await db.query.tasks.findFirst({
+    where: eq(tasks.id, run.taskId),
+    columns: { safetyStoppedAt: true },
+  });
+  if (taskSafety?.safetyStoppedAt) return 'already_notified';
 
   // A review child's outcome reaches the session through exactly one pipe,
   // the PR feedback relay built from its summary comment. That holds for

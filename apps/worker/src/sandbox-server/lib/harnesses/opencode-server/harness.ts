@@ -1,4 +1,5 @@
 import EventEmitter from 'node:events';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -6,6 +7,12 @@ import { spawnSync } from 'node:child_process';
 
 import {
   asBoolean,
+  AGENT_SAFETY_STOP_TEXT,
+  AgentSafetyPass,
+  AGENT_SAFETY,
+  isAgentSafetyStop,
+  type AgentSafetyReason,
+  type AgentSafetyStopDetails,
   asFiniteNumber,
   asRecord,
   asString,
@@ -124,6 +131,10 @@ import {
 } from '../../../../run-task/opencode-model';
 
 interface OpenCodeServerHarnessOptions {
+  onSafetyStop?: (
+    reason: AgentSafetyReason,
+    details: AgentSafetyStopDetails,
+  ) => Promise<void>;
   client: OpenCodeServerClient;
   workspacePath: string;
   logger: {
@@ -290,7 +301,7 @@ interface ActiveOpenCodeExecuteToolProgress {
   timer: ReturnType<typeof setTimeout>;
 }
 
-// Tracks a live subagent spawn. Subagent runs are not time-bounded: the only
+// Tracks a live subagent spawn. AgentSafetyPass independently bounds live work;
 // terminal signals are the task tool part settling, the child session going
 // idle (background launches), or parent-turn teardown. This tracker exists to
 // route child-session events — live activity folded into the spawn row,
@@ -1639,6 +1650,13 @@ export class OpenCodeServerHarness
   implements Harness
 {
   private readonly client: OpenCodeServerClient;
+  private readonly safetyPasses = new Map<string, AgentSafetyPass>();
+  private readonly onSafetyStop: OpenCodeServerHarnessOptions['onSafetyStop'];
+  private readonly safetyTimer: ReturnType<typeof setInterval>;
+  private safetyStopped = false;
+  private readonly safetyStoppedSessionIds = new Set<string>();
+  private readonly settledSafetySessions = new Set<string>();
+  private readonly settledSubagentWatchdogKeys = new Set<string>();
   private readonly workspacePath: string;
   private readonly normalizedWorkspacePath: string;
   private readonly logger: OpenCodeServerHarnessOptions['logger'];
@@ -1835,6 +1853,25 @@ export class OpenCodeServerHarness
     this.fallbackReasoningEffort = options.fallbackReasoningEffort;
     this.fallbackRole = options.fallbackRole;
     this.agentFallbacks = options.agentFallbacks ?? {};
+    this.onSafetyStop = options.onSafetyStop;
+    this.safetyTimer = setInterval(() => {
+      for (const watchdog of this.activeSubagentWatchdogs.values()) {
+        if (Date.now() - watchdog.startedAtMs >= AGENT_SAFETY.passTimeoutMs) {
+          void this.stopForSafety(
+            'pass_time_limit',
+            watchdog.childSessionId ?? watchdog.sessionId,
+          );
+          return;
+        }
+      }
+      for (const [id, pass] of this.safetyPasses) {
+        if (id !== this.sessionId && pass.checkTime()) {
+          void this.stopForSafety('pass_time_limit', id);
+          break;
+        }
+      }
+    }, 1_000);
+    this.safetyTimer.unref?.();
     this.commandEnv = options.commandEnv
       ? { ...options.commandEnv }
       : undefined;
@@ -2003,7 +2040,7 @@ export class OpenCodeServerHarness
   }
 
   sendCommand(command: TaskCommand): boolean {
-    if (this.disposed || !this.connected) {
+    if (this.disposed || this.safetyStopped || !this.connected) {
       return false;
     }
 
@@ -2061,6 +2098,8 @@ export class OpenCodeServerHarness
   }
 
   dispose(): void {
+    clearInterval(this.safetyTimer);
+    this.safetyPasses.clear();
     this.disposed = true;
     this.connected = false;
     this.clearReplayAbortErrorSuppression();
@@ -2719,6 +2758,10 @@ export class OpenCodeServerHarness
       updatePayload: Record<string, unknown>;
     },
   ): void {
+    if (this.settledSubagentWatchdogKeys.has(eventKey)) return;
+    if (input.childSessionId)
+      this.settledSafetySessions.delete(input.childSessionId);
+    if (input.childSessionId) this.safetyPass(input.childSessionId);
     const existing = this.activeSubagentWatchdogs.get(eventKey);
 
     if (existing) {
@@ -2852,6 +2895,7 @@ export class OpenCodeServerHarness
   }
 
   private stopSubagentWatchdog(eventKey: string): void {
+    this.settledSubagentWatchdogKeys.add(eventKey);
     const watchdog = this.activeSubagentWatchdogs.get(eventKey);
 
     if (!watchdog) {
@@ -2863,6 +2907,8 @@ export class OpenCodeServerHarness
     }
     this.clearSubagentActivityFlush(watchdog);
     if (watchdog.childSessionId) {
+      this.settledSafetySessions.add(watchdog.childSessionId);
+      this.safetyPasses.delete(watchdog.childSessionId);
       this.childSessionWatchdogKeys.delete(watchdog.childSessionId);
       this.linkedChildSessions.delete(watchdog.childSessionId);
     }
@@ -2895,8 +2941,11 @@ export class OpenCodeServerHarness
         clearTimeout(watchdog.settlementTimer);
       }
       this.clearSubagentActivityFlush(watchdog);
+      this.settledSubagentWatchdogKeys.add(eventKey);
       this.activeSubagentWatchdogs.delete(eventKey);
       if (watchdog.childSessionId) {
+        this.settledSafetySessions.add(watchdog.childSessionId);
+        this.safetyPasses.delete(watchdog.childSessionId);
         this.childSessionWatchdogKeys.delete(watchdog.childSessionId);
         this.linkedChildSessions.delete(watchdog.childSessionId);
       }
@@ -3954,9 +4003,11 @@ export class OpenCodeServerHarness
   }
 
   private async submitPrompt(prompt: PromptInput): Promise<void> {
+    if (this.safetyStopped || this.disposed) return;
     this.suppressAssistantOutputUntilNextPrompt = false;
     this.latestUserRequest = prompt.text;
     const sessionId = await this.ensureSession(prompt.text);
+    if (this.safetyStopped || this.disposed) return;
     // OpenCode determines whether a user turn is pending by comparing message
     // IDs lexicographically. A snapshot can resume on a process whose clock or
     // generator state trails the process that wrote the restored assistant
@@ -4013,6 +4064,7 @@ export class OpenCodeServerHarness
       promptModel && agent !== OPENCODE_ARCHITECT_AGENT,
     );
     try {
+      if (this.safetyStopped || this.disposed) return;
       await this.client.promptAsync({
         sessionId,
         signal: this.eventAbortController.signal,
@@ -4058,6 +4110,47 @@ export class OpenCodeServerHarness
     }
 
     const payload = unwrapped.payload;
+    if (this.safetyStopped) {
+      // A late child creation must not become an orphan after tree cancellation.
+      const info = asRecord(asRecord(payload.properties)?.info);
+      const lateId = asString(info?.id);
+      if (
+        payload.type === 'session.created' &&
+        lateId &&
+        this.safetyStoppedSessionIds.has(asString(info?.parentID) ?? '')
+      ) {
+        this.safetyStoppedSessionIds.add(lateId);
+        void this.client
+          .abort({ sessionId: lateId, signal: AbortSignal.timeout(5_000) })
+          .catch(() => undefined);
+      }
+      return;
+    }
+
+    const properties = asRecord(payload.properties);
+    const created = asRecord(properties?.info);
+    if (
+      payload.type === 'session.created' ||
+      payload.type === 'session.updated'
+    ) {
+      const parentId = asString(created?.parentID);
+      const childId = asString(created?.id) ?? asString(properties?.sessionID);
+      if (
+        childId &&
+        parentId &&
+        (parentId === this.sessionId || this.linkedChildSessions.has(parentId))
+      ) {
+        this.linkedChildSessions.set(childId, {
+          parentSessionId: parentId,
+          agentType: this.linkedChildSessions.get(childId)?.agentType ?? null,
+        });
+        if (
+          payload.type === 'session.created' &&
+          !this.settledSafetySessions.has(childId)
+        )
+          this.safetyPass(childId);
+      }
+    }
 
     // A subagent's gated call pauses its own session, so an ask is relayed
     // whichever session in this workspace raised it.
@@ -4067,6 +4160,72 @@ export class OpenCodeServerHarness
     }
 
     const sessionId = eventSessionId(payload);
+
+    if (
+      sessionId &&
+      (sessionId === this.sessionId || this.linkedChildSessions.has(sessionId))
+    ) {
+      const error =
+        properties?.error ??
+        asRecord(properties?.status)?.message ??
+        asRecord(properties?.info)?.error;
+      if (isAgentSafetyStop(error)) {
+        await this.stopForSafety('task_request_limit', sessionId);
+        return;
+      }
+      const pass =
+        this.safetyPasses.get(sessionId) ??
+        (!this.settledSafetySessions.has(sessionId) &&
+        (['message.part.updated', 'message.updated'].includes(payload.type) ||
+          ['busy', 'retry'].includes(
+            asString(asRecord(properties?.status)?.type) ?? '',
+          ))
+          ? this.safetyPass(sessionId)
+          : undefined);
+      const part = asRecord(properties?.part);
+      let reason: AgentSafetyReason | undefined;
+      if (payload.type === 'message.part.updated' && part?.type === 'tool') {
+        const state = asRecord(part.state);
+        if (
+          ['completed', 'error', 'failed'].includes(
+            asString(state?.status) ?? '',
+          ) &&
+          asString(part.callID)
+        ) {
+          reason = pass?.completed({
+            id: String(part.callID),
+            name: asString(part.tool) ?? '',
+            args: state?.input,
+            result: {
+              status: state?.status,
+              output: state?.output,
+              error: state?.error,
+            },
+          });
+        }
+      }
+      // A model step is an assistant message, not every streaming update.
+      const info = asRecord(properties?.info);
+      if (
+        sessionId !== this.sessionId &&
+        payload.type === 'message.updated' &&
+        info?.role === 'assistant' &&
+        asString(info.id)
+      )
+        reason ??= pass?.step(String(info.id));
+      if (reason) {
+        await this.stopForSafety(reason, sessionId);
+        return;
+      }
+      if (
+        sessionId !== this.sessionId &&
+        payload.type === 'session.idle' &&
+        !this.childSessionWatchdogKeys.has(sessionId)
+      ) {
+        this.safetyPasses.delete(sessionId);
+        this.settledSafetySessions.add(sessionId);
+      }
+    }
 
     if (sessionId && this.sessionId && sessionId !== this.sessionId) {
       const relationship = this.linkedChildSessions.get(sessionId);
@@ -4161,9 +4320,95 @@ export class OpenCodeServerHarness
     }
   }
 
+  private safetyPass(sessionId: string): AgentSafetyPass {
+    let pass = this.safetyPasses.get(sessionId);
+    if (!pass) {
+      pass = new AgentSafetyPass((value) =>
+        createHash('sha256').update(value).digest('hex'),
+      );
+      this.safetyPasses.set(sessionId, pass);
+    }
+    return pass;
+  }
+
+  /** Stop the entire tree: a parent cannot retry or replace a safety-stopped pass. */
+  private async stopForSafety(
+    reason: AgentSafetyReason,
+    stoppedSessionId: string,
+  ): Promise<void> {
+    if (this.safetyStopped || this.disposed) return;
+    this.safetyStopped = true;
+    clearInterval(this.safetyTimer);
+    const sessionId = this.sessionId;
+    const ids = new Set([
+      stoppedSessionId,
+      ...this.linkedChildSessions.keys(),
+      ...(sessionId ? [sessionId] : []),
+    ]);
+    for (const id of ids) this.safetyStoppedSessionIds.add(id);
+    const details = {
+      sessionId: stoppedSessionId,
+      ...this.safetyPasses.get(stoppedSessionId)?.snapshot(),
+    };
+    this.prompts.clear();
+    this.clearQueuedPromptRetryTimer();
+    this.clearProviderErrorRecoveryState();
+    this.clearAllExecuteToolProgress();
+    this.clearVisualProofTimeout();
+    this.pendingUserInputRequests.clear();
+    this.nativeQuestionRequestIds.clear();
+    this.inFlight = false;
+    // Commit the admission latch and parent notice before cancelling. A bounded
+    // persistence failure still stops locally; the gateway ceiling remains.
+    try {
+      await this.onSafetyStop?.(reason, details);
+    } catch {
+      this.logger.error(
+        'Could not persist agent safety stop; stopping local execution.',
+      );
+    }
+    await Promise.allSettled(
+      [...ids].map((id) =>
+        this.client.abort({
+          sessionId: id,
+          signal: AbortSignal.timeout(5_000),
+        }),
+      ),
+    );
+    if (!sessionId) return;
+    const text = `${AGENT_SAFETY_STOP_TEXT}\n\nReason: ${reason}. Stopped pass: ${stoppedSessionId}.`;
+    this.runtimeEvents.assistantMessage({
+      sessionId,
+      text,
+      metadata: {
+        [TERMINAL_PROVIDER_ERROR_PAYLOAD_KEY]: { errorSummary: text },
+      },
+      payload: {
+        [TERMINAL_PROVIDER_ERROR_PAYLOAD_KEY]: { errorSummary: text },
+      },
+    });
+    this.emit('taskEvent', {
+      eventName: TaskEventName.Message,
+      payload: [
+        {
+          taskId: sessionId,
+          action: 'created',
+          message: {
+            ts: Date.now(),
+            type: 'say',
+            say: TERMINAL_PROVIDER_ERROR_SAY,
+            text,
+          },
+        },
+      ],
+    });
+    this.runtimeEvents.taskAborted(sessionId);
+  }
+
   private async handleSessionStatus(
     payload: OpenCodeEventPayload,
   ): Promise<void> {
+    if (this.safetyStopped) return;
     const properties = asRecord(payload.properties);
     const status = asRecord(properties?.status);
     const statusType = asString(status?.type);
@@ -4174,6 +4419,10 @@ export class OpenCodeServerHarness
         asString(properties?.sessionId) ??
         this.sessionId;
       const message = asString(status?.message);
+      if (sessionId && isAgentSafetyStop(message)) {
+        await this.stopForSafety('task_request_limit', sessionId);
+        return;
+      }
       const retryAttempt = asFiniteNumber(status?.attempt);
       const isTerminalProviderError = isOpenCodeTerminalProviderError(status);
       const exhaustedRetryBudget =
@@ -4329,6 +4578,7 @@ export class OpenCodeServerHarness
         `Failed to abort OpenCode before model fallback sessionId=${sessionId}: ${abortError instanceof Error ? abortError.message : String(abortError)}`,
       );
     }
+    if (this.safetyStopped) return;
     this.emit('modelFallbackRequested', {
       role: this.fallbackRole,
       fromModelId: this.activeModelId,
@@ -4437,6 +4687,7 @@ export class OpenCodeServerHarness
           })
         : Promise.resolve(),
     ]);
+    if (this.safetyStopped) return true;
     this.emit('modelFallbackRequested', {
       role: fallback.role,
       fromModelId: fallback.activeModelId,
@@ -4539,12 +4790,17 @@ export class OpenCodeServerHarness
   private async handleSessionError(
     payload: OpenCodeEventPayload,
   ): Promise<void> {
+    if (this.safetyStopped) return;
     const properties = asRecord(payload.properties);
     const sessionId =
       asString(properties?.sessionID) ??
       asString(properties?.sessionId) ??
       this.sessionId;
     const error = properties?.error;
+    if (sessionId && isAgentSafetyStop(error)) {
+      await this.stopForSafety('task_request_limit', sessionId);
+      return;
+    }
 
     if (isOpenCodeContextOverflowError(error)) {
       if (this.pendingContextOverflowError === null) {
@@ -5610,6 +5866,7 @@ export class OpenCodeServerHarness
   private async finishCurrentTurn(
     source: 'session_status' | 'session_idle' = 'session_idle',
   ): Promise<void> {
+    if (this.safetyStopped) return;
     if (!this.inFlight && !this.prompts.hasQueuedMessages()) {
       return;
     }
@@ -5628,6 +5885,7 @@ export class OpenCodeServerHarness
     const finalized =
       (await this.finalizeLatestAssistantMessage()) ??
       this.finalizedAssistantTurn;
+    if (this.safetyStopped) return;
     const sessionId = this.sessionId;
 
     this.inFlight = false;
@@ -5722,6 +5980,8 @@ export class OpenCodeServerHarness
         this.runtimeEvents.turnCompleted(sessionId, completionText);
       }
 
+      if (this.safetyStopped) return;
+      this.safetyPasses.delete(sessionId);
       this.runtimeEvents.taskCompleted(sessionId, finalized?.tokenUsage, {
         ...(missingChatCloseoutReminderCount !== null
           ? {

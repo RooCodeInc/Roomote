@@ -149,6 +149,7 @@ export function classifyModelFallbackTrigger(
   error: unknown,
   { retriesUsed }: { retriesUsed: number },
 ): ModelFallbackTrigger | null {
+  if (isAgentSafetyStop(error)) return null;
   if (isInferenceCreditsExhaustedError(error)) return 'immediate';
   const values = collectProviderErrorValues(error);
   const records = values.flatMap((value) => {
@@ -202,3 +203,4 @@ export function classifyModelFallbackTrigger(
     ? 'after_retries'
     : null;
 }
+import { isAgentSafetyStop } from './agent-safety';

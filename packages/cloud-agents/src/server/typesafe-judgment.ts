@@ -5,9 +5,11 @@ import {
   getDeploymentJudgmentModelSelection,
   recordLlmUsage,
   resolveModelProviderEnvValue,
+  admitTaskInferenceRequest,
 } from '@roomote/db/server';
 import {
   resolveEffectiveJudgmentModelSelection,
+  AGENT_SAFETY_STOP_TEXT,
   TYPESAFE_API_KEY_ENV_VAR_NAME,
   type ReasoningEffort,
 } from '@roomote/types';
@@ -986,6 +988,7 @@ async function requestFromBackend(
 type TypeSafeJudgmentParams<
   TQuestions extends Record<string, TypeSafeQuestion>,
 > = {
+  taskId?: string | null;
   /** JSON-serializable context the questions are answered over. */
   state: unknown;
   questions: TQuestions;
@@ -1048,6 +1051,8 @@ export async function evaluateTypeSafeJudgmentsWithUsage<
   let response: TrackedJudgmentResponse | undefined;
 
   try {
+    if (params.taskId && !(await admitTaskInferenceRequest(params.taskId)))
+      throw new Error(AGENT_SAFETY_STOP_TEXT);
     ({ answers, response } = await requestFromBackend(
       backend,
       params.state,
@@ -1273,7 +1278,11 @@ function shadowFailureCategory(error: unknown): string {
 async function shadowRoomoteJudgment(
   primaryProvider: JudgmentBackend['provider'],
   requestId: string,
-  params: { state: unknown; questions: Record<string, TypeSafeQuestion> },
+  params: {
+    state: unknown;
+    questions: Record<string, TypeSafeQuestion>;
+    taskId?: string | null;
+  },
   primary: Record<string, unknown> | undefined,
 ): Promise<void> {
   const upstream = resolveRoomoteJudgmentUpstream();
@@ -1286,6 +1295,8 @@ async function shadowRoomoteJudgment(
   let response: TrackedJudgmentResponse | undefined;
 
   try {
+    if (params.taskId && !(await admitTaskInferenceRequest(params.taskId)))
+      return;
     const request = await requestRoomoteDecisions(
       upstream,
       params.state,
