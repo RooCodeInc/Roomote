@@ -92,6 +92,33 @@ describe('PersonalIntegrations', () => {
     expect(
       screen.getByText('No personal integrations yet.'),
     ).toBeInTheDocument();
+    expect(screen.queryByRole('table')).toBeNull();
+    expect(screen.queryByRole('rowgroup')).toBeNull();
+  });
+
+  it('does not announce a table while the first integrations load', () => {
+    keyState.isLoading = true;
+    render(<PersonalIntegrations />);
+
+    expect(screen.queryByRole('table')).toBeNull();
+    expect(screen.queryByRole('rowgroup')).toBeNull();
+    expect(screen.queryByText('No personal integrations yet.')).toBeNull();
+    expect(
+      screen.getByRole('button', { name: 'Add personal integration' }),
+    ).toBeEnabled();
+  });
+
+  it('keeps existing integration rows navigable while another source loads', () => {
+    keyState.isLoading = true;
+    mcpState.items = [buildItem('deepwiki', 'deepwiki')];
+    render(<PersonalIntegrations />);
+
+    const table = screen.getByRole('table', { name: 'Personal integrations' });
+    expect(table).toHaveTextContent('deepwiki');
+    expect(
+      table.querySelector('[role="rowgroup"] > [role="row"]'),
+    ).not.toBeNull();
+    expect(screen.queryByText('No personal integrations yet.')).toBeNull();
   });
 
   it('surfaces a failure from either source instead of the empty state', () => {
@@ -105,5 +132,7 @@ describe('PersonalIntegrations', () => {
       'Integrations are unavailable.',
     ]);
     expect(screen.queryByText('No personal integrations yet.')).toBeNull();
+    expect(screen.queryByRole('table')).toBeNull();
+    expect(screen.queryByRole('rowgroup')).toBeNull();
   });
 });
