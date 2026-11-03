@@ -13,7 +13,7 @@
     "overrides": {
       "axios": "1.20.0",
       "@azure/msal-node": "7.1.0",
-      "follow-redirects": "1.16.1",
+      "follow-redirects": "1.16.2",
       "moment": "2.31.0",
       "toml": "5.0.1"
     }

@@ -107,7 +107,7 @@
       "next>postcss": "^8.5.14",
       "tmp": ">=0.2.6",
       "glob": ">=13.0.3",
-      "follow-redirects": "1.16.1",
+      "follow-redirects": "1.16.2",
       "ioredis": "5.10.1",
       "better-auth>zod": "^4.5.0",
       "@better-auth/core>zod": "^4.5.0",
