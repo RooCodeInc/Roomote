@@ -755,6 +755,7 @@ function CustomToolManagementDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const trpc = useTRPC();
+  const queryClient = useQueryClient();
   const { isAdmin } = useAuthorizedUser();
   const [retryError, setRetryError] = useState<{
     serverId: string;
@@ -787,11 +788,16 @@ function CustomToolManagementDialog({
   };
   const testConnection = async () => {
     if (!server || toolsQuery.isFetching) return;
-    const result = await toolsQuery.refetch({ cancelRefetch: false });
-    if (result.isError) {
-      toast.error(`Connection test failed for ${server.name}.`);
-    } else if (result.isSuccess) {
+    try {
+      await queryClient.fetchQuery(
+        trpc.customMcpServers.listTools.queryOptions(
+          { id: server.id },
+          { staleTime: 0, retry: false },
+        ),
+      );
       toast.success(`Connection test passed for ${server.name}.`);
+    } catch {
+      toast.error(`Connection test failed for ${server.name}.`);
     }
   };
   return (

@@ -538,59 +538,90 @@ describe('useCustomMcpServers', () => {
     expect(approvals.setMode).not.toHaveBeenCalled();
   });
 
-  it('keeps a late connection-test response and its feedback identified with the tested server', async () => {
-    const first = buildServer();
-    const second = buildServer({
-      id: '00000000-0000-4000-8000-000000000302',
-      name: 'second-tools',
-    });
-    state.servers = [first, second];
-    toolsRequestMock.mockResolvedValueOnce({ tools: [] });
-    renderHarness();
-    fireEvent.click(
-      await screen.findByRole('button', {
-        name: 'Manage internal-tools tools',
-      }),
-    );
-    const test = await screen.findByRole('button', {
-      name: 'Test internal-tools connection',
-    });
-    await waitFor(() => expect(test).toBeEnabled());
-    let finish!: (result: { tools: typeof state.tools }) => void;
-    toolsRequestMock.mockImplementationOnce(
-      () =>
-        new Promise((resolve) => {
-          finish = resolve;
+  it.each([true, false])(
+    'keeps opposite late connection-test outcomes scoped to the tested server (first fails: %s)',
+    async (firstFails) => {
+      const first = buildServer();
+      const second = buildServer({
+        id: '00000000-0000-4000-8000-000000000302',
+        name: 'second-tools',
+      });
+      state.servers = [first, second];
+      toolsRequestMock.mockResolvedValueOnce({ tools: [] });
+      renderHarness();
+      fireEvent.click(
+        await screen.findByRole('button', {
+          name: 'Manage internal-tools tools',
         }),
-    );
-    fireEvent.click(test);
-    await waitFor(() => expect(test).toBeDisabled());
-    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
-    toolsRequestMock.mockResolvedValueOnce({
-      tools: [{ name: 'second_tool', description: null, enabled: true }],
-    });
-    fireEvent.click(
-      await screen.findByRole('button', { name: 'Manage second-tools tools' }),
-    );
-    await screen.findByRole('group', { name: 'Approval mode for second_tool' });
-    finish({
-      tools: [{ name: 'first_tool', description: null, enabled: true }],
-    });
-    await waitFor(() =>
-      expect(toastSuccessMock).toHaveBeenCalledWith(
-        'Connection test passed for internal-tools.',
-      ),
-    );
-    expect(
-      screen.getByRole('group', { name: 'Approval mode for second_tool' }),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByRole('group', { name: 'Approval mode for first_tool' }),
-    ).toBeNull();
-    expect(
-      screen.getByRole('button', { name: 'Test second-tools connection' }),
-    ).toBeEnabled();
-  });
+      );
+      const test = await screen.findByRole('button', {
+        name: 'Test internal-tools connection',
+      });
+      await waitFor(() => expect(test).toBeEnabled());
+      let finish!: (result: { tools: typeof state.tools }) => void;
+      let fail!: (error: Error) => void;
+      toolsRequestMock.mockImplementationOnce(
+        () =>
+          new Promise((resolve, reject) => {
+            finish = resolve;
+            fail = reject;
+          }),
+      );
+      fireEvent.click(test);
+      await waitFor(() => expect(test).toBeDisabled());
+      fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+      if (firstFails) {
+        toolsRequestMock.mockResolvedValueOnce({
+          tools: [{ name: 'second_tool', description: null, enabled: true }],
+        });
+      } else {
+        toolsRequestMock.mockRejectedValueOnce(new Error('Second unavailable'));
+      }
+      fireEvent.click(
+        await screen.findByRole('button', {
+          name: 'Manage second-tools tools',
+        }),
+      );
+      if (firstFails) {
+        await screen.findByRole('group', {
+          name: 'Approval mode for second_tool',
+        });
+        fail(new Error('First unavailable'));
+      } else {
+        expect(await screen.findByRole('alert')).toHaveTextContent(
+          'Second unavailable',
+        );
+        finish({
+          tools: [{ name: 'first_tool', description: null, enabled: true }],
+        });
+      }
+      await waitFor(() =>
+        expect(
+          firstFails ? toastErrorMock : toastSuccessMock,
+        ).toHaveBeenCalledWith(
+          `Connection test ${firstFails ? 'failed' : 'passed'} for internal-tools.`,
+        ),
+      );
+      expect(
+        firstFails ? toastSuccessMock : toastErrorMock,
+      ).not.toHaveBeenCalled();
+      if (firstFails) {
+        expect(
+          screen.getByRole('group', { name: 'Approval mode for second_tool' }),
+        ).toBeInTheDocument();
+      } else {
+        expect(screen.getByRole('alert')).toHaveTextContent(
+          'Second unavailable',
+        );
+      }
+      expect(
+        screen.queryByRole('group', { name: 'Approval mode for first_tool' }),
+      ).toBeNull();
+      expect(
+        screen.getByRole('button', { name: 'Test second-tools connection' }),
+      ).toBeEnabled();
+    },
+  );
 
   it('keeps a pending retry and its late response scoped to the selected server', async () => {
     const first = buildServer();
