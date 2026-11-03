@@ -2,12 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 
 import { getRoomoteMcpResourceUrl, ROOMOTE_MCP_SCOPE } from '@roomote/auth';
+import { createMcpOAuthCode } from '@roomote/redis';
 
 import { authorize } from '@/lib/server';
 import { bootstrapWebRuntimeEnv } from '@/lib/server/bootstrap-runtime-env';
 import { getPublicAppUrl } from '@/lib/server/get-public-app-url';
 import {
-  createRemoteMcpAuthorizationCode,
   createRemoteMcpConsentToken,
   consumeRemoteMcpConsentToken,
   getRemoteMcpOAuthClient,
@@ -348,14 +348,17 @@ async function handleAuthorize(request: NextRequest, approved: boolean) {
     );
   }
 
-  const code = await createRemoteMcpAuthorizationCode({
-    userId: auth.userId,
-    clientId: input.client_id,
-    redirectUri: input.redirect_uri,
-    codeChallenge: input.code_challenge,
-    resource,
-    scopes,
-  });
+  const code = await createMcpOAuthCode(
+    {
+      userId: auth.userId,
+      clientId: input.client_id,
+      redirectUri: input.redirect_uri,
+      codeChallenge: input.code_challenge,
+      resource,
+      scopes,
+    },
+    client.clientName,
+  );
   const redirect = new URL(input.redirect_uri);
   redirect.searchParams.set('code', code);
   redirect.searchParams.set('state', input.state);

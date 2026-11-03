@@ -6,16 +6,17 @@ import {
   DEFAULT_MCP_ACCESS_TOKEN_TIMEOUT_MS,
   ROOMOTE_MCP_SCOPE,
 } from '@roomote/auth';
+import {
+  exchangeMcpOAuthCode,
+  getMcpOAuthCode,
+  getMcpOAuthRefresh,
+  rotateMcpOAuthRefresh,
+  revokeMcpOAuthRefresh,
+} from '@roomote/redis';
 
 import {
-  consumeRemoteMcpAuthorizationCode,
-  createRemoteMcpRefreshSession,
-  getRemoteMcpAuthorizationCode,
   getRemoteMcpOAuthClient,
-  getRemoteMcpRefreshSession,
   promoteRemoteMcpOAuthClient,
-  revokeRemoteMcpRefreshSessionOnReplay,
-  rotateRemoteMcpRefreshToken,
   verifyPkceChallenge,
 } from '@/lib/server/mcp-remote-oauth';
 import { bootstrapWebRuntimeEnv } from '@/lib/server/bootstrap-runtime-env';
@@ -79,7 +80,7 @@ export async function POST(request: NextRequest) {
 
   if (input.grant_type === 'refresh_token') {
     const [session, client] = await Promise.all([
-      getRemoteMcpRefreshSession(input.refresh_token),
+      getMcpOAuthRefresh(input.refresh_token),
       getRemoteMcpOAuthClient(input.client_id),
     ]);
     if (!session) {
@@ -87,7 +88,7 @@ export async function POST(request: NextRequest) {
       // already-rotated token, its replay revokes the entire session family
       // per the OAuth 2.0 Security BCP (refresh token rotation with reuse
       // detection); unknown or expired tokens are ignored.
-      await revokeRemoteMcpRefreshSessionOnReplay(input.refresh_token);
+      await revokeMcpOAuthRefresh(input.refresh_token, input.client_id);
       return oauthError('invalid_grant');
     }
     if (
@@ -104,14 +105,13 @@ export async function POST(request: NextRequest) {
 
     const accessToken = await createMcpAccessToken({
       userId: session.userId,
+      clientId: session.clientId,
+      grantId: session.grantId,
       resource: session.resource,
       scopes: [ROOMOTE_MCP_SCOPE],
       timeoutMs: DEFAULT_MCP_ACCESS_TOKEN_TIMEOUT_MS,
     });
-    const rotation = await rotateRemoteMcpRefreshToken(
-      input.refresh_token,
-      session,
-    );
+    const rotation = await rotateMcpOAuthRefresh(input.refresh_token, session);
     if (rotation.status !== 'ok') return oauthError('invalid_grant');
     // Rotation already committed: renewal must not withhold the new token,
     // since retrying the old token would revoke the session as a replay.
@@ -126,7 +126,7 @@ export async function POST(request: NextRequest) {
     return tokenResponse(accessToken, rotation.refreshToken);
   }
 
-  const authorization = await getRemoteMcpAuthorizationCode(input.code);
+  const authorization = await getMcpOAuthCode(input.code);
   const client = authorization
     ? await getRemoteMcpOAuthClient(authorization.clientId)
     : null;
@@ -153,24 +153,22 @@ export async function POST(request: NextRequest) {
     return oauthError('invalid_grant');
   }
 
-  if (!(await consumeRemoteMcpAuthorizationCode(input.code, authorization))) {
+  const exchange = await exchangeMcpOAuthCode(
+    input.code,
+    authorization,
+    client.grantTypes.includes('refresh_token'),
+  );
+  if (!exchange) {
     return oauthError('invalid_grant');
   }
 
   const accessToken = await createMcpAccessToken({
     userId: authorization.userId,
+    clientId: authorization.clientId,
+    grantId: authorization.grantId,
     resource: authorization.resource,
     scopes: [ROOMOTE_MCP_SCOPE],
     timeoutMs: DEFAULT_MCP_ACCESS_TOKEN_TIMEOUT_MS,
   });
-  const refreshToken = client.grantTypes.includes('refresh_token')
-    ? await createRemoteMcpRefreshSession({
-        userId: authorization.userId,
-        clientId: authorization.clientId,
-        resource: authorization.resource,
-        scopes: [ROOMOTE_MCP_SCOPE],
-      })
-    : undefined;
-
-  return tokenResponse(accessToken, refreshToken);
+  return tokenResponse(accessToken, exchange.refreshToken);
 }

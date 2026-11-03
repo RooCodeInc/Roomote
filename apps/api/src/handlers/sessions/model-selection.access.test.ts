@@ -2,6 +2,7 @@ import { generateKeyPairSync } from 'node:crypto';
 import { once } from 'node:events';
 import { writeFile } from 'node:fs/promises';
 import { serve } from '@hono/node-server';
+import { oauthGrantFixture } from '../mcp/__tests__/oauth-fixture';
 import {
   configureAuthClientEnv,
   createAuthToken,
@@ -111,6 +112,10 @@ describe('configured session model API', () => {
     const base = `http://127.0.0.1:${address.port}`;
     const token = await createAuthToken({ userId: user.id, timeoutMs: 60000 });
     const oauth = await createMcpAccessToken({
+      ...(await oauthGrantFixture(
+        user.id,
+        getRoomoteMcpResourceUrl(Env.R_PUBLIC_URL ?? Env.R_APP_URL),
+      )),
       userId: user.id,
       resource: getRoomoteMcpResourceUrl(Env.R_PUBLIC_URL ?? Env.R_APP_URL),
       scopes: [ROOMOTE_MCP_SCOPE],

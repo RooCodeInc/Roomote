@@ -23,10 +23,10 @@ vi.mock('@/lib/server/bootstrap-runtime-env', () => ({
 }));
 vi.mock('@/lib/server/mcp-remote-oauth', () => ({
   getRemoteMcpOAuthClient: mockGetClient,
-  createRemoteMcpAuthorizationCode: mockCreateCode,
   createRemoteMcpConsentToken: mockCreateConsentToken,
   consumeRemoteMcpConsentToken: mockConsumeConsentToken,
 }));
+vi.mock('@roomote/redis', () => ({ createMcpOAuthCode: mockCreateCode }));
 
 import { GET, POST } from '../route';
 
@@ -133,14 +133,17 @@ describe('GET /api/mcp-remote-oauth/authorize', () => {
     expect(location.toString()).toBe(
       'https://client.example/callback?code=authorization-code&state=client-state',
     );
-    expect(mockCreateCode).toHaveBeenCalledWith({
-      userId: 'user-1',
-      clientId,
-      redirectUri,
-      codeChallenge: 'a'.repeat(43),
-      resource: 'https://roomote.example/mcp',
-      scopes: ['mcp:roomote'],
-    });
+    expect(mockCreateCode).toHaveBeenCalledWith(
+      {
+        userId: 'user-1',
+        clientId,
+        redirectUri,
+        codeChallenge: 'a'.repeat(43),
+        resource: 'https://roomote.example/mcp',
+        scopes: ['mcp:roomote'],
+      },
+      'Claude Code',
+    );
     expect(mockConsumeConsentToken).toHaveBeenCalledWith('consent-token', {
       userId: 'user-1',
       requestTarget: expect.stringContaining(
@@ -185,6 +188,7 @@ describe('GET /api/mcp-remote-oauth/authorize', () => {
     );
     expect(mockCreateCode).toHaveBeenCalledWith(
       expect.objectContaining({ redirectUri: codexRedirectUri }),
+      'Codex',
     );
   });
 
@@ -224,6 +228,7 @@ describe('GET /api/mcp-remote-oauth/authorize', () => {
     );
     expect(mockCreateCode).toHaveBeenCalledWith(
       expect.objectContaining({ redirectUri: cursorRedirectUri }),
+      'Cursor',
     );
   });
 
@@ -263,6 +268,7 @@ describe('GET /api/mcp-remote-oauth/authorize', () => {
     );
     expect(mockCreateCode).toHaveBeenCalledWith(
       expect.objectContaining({ redirectUri: claudeRedirectUri }),
+      'Claude Code',
     );
   });
 
@@ -301,6 +307,7 @@ describe('GET /api/mcp-remote-oauth/authorize', () => {
     expect(response.status).toBe(303);
     expect(mockCreateCode).toHaveBeenCalledWith(
       expect.objectContaining({ resource: 'https://roomote.example/mcp' }),
+      'Claude Code',
     );
   });
 

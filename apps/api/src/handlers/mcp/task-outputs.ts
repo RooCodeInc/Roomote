@@ -38,7 +38,7 @@ import { resolveRoomoteMemberAuth } from './roomote-member-auth';
 type MemberContext = Context<{ Variables: Variables & { mcpAuth: McpAuth } }>;
 
 async function requireReadableTask(taskId: string, auth: McpAuth) {
-  const member = resolveRoomoteMemberAuth(auth.authContext);
+  const member = await resolveRoomoteMemberAuth(auth.authContext);
   const task = await db.query.tasks.findFirst({
     columns: { id: true },
     where: and(
@@ -234,7 +234,7 @@ export async function downloadMemberTaskArtifact(
 ): Promise<Response> {
   c.header('Cache-Control', 'private, no-store');
   try {
-    const auth = resolveRoomoteMemberAuth(c.get('authContext'));
+    const auth = await resolveRoomoteMemberAuth(c.get('authContext'));
     const input = z
       .object({
         taskId: z.string().regex(/^[0-9a-z]{13}$/),

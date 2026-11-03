@@ -8,6 +8,7 @@ import {
   validateSessionBrokerToken,
 } from '@roomote/auth';
 import { db, deploymentSettings, eq, users } from '@roomote/db/server';
+import { isMcpOAuthGrantLive } from '@roomote/redis';
 import {
   CREDENTIAL_EGRESS_PROXY_PATH,
   isRoomoteDeploymentDisabled,
@@ -123,7 +124,8 @@ export const tokenAuthMiddleware = () =>
         | undefined;
 
       try {
-        userScopedAuth = await validateMcpAccessToken(token);
+        const oauth = await validateMcpAccessToken(token);
+        if (await isMcpOAuthGrantLive(oauth)) userScopedAuth = oauth;
       } catch {
         // Not an MCP OAuth token, try the internal user auth token below.
       }

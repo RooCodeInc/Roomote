@@ -18,7 +18,7 @@ const cursorSchema = z
 export async function listMemberModels(c: Context<{ Variables: Variables }>) {
   c.header('Cache-Control', 'no-store, private');
   try {
-    resolveRoomoteMemberAuth(c.get('authContext'));
+    await resolveRoomoteMemberAuth(c.get('authContext'));
   } catch (error) {
     if (error instanceof McpProxyError)
       return Response.json(

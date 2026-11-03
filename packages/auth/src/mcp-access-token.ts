@@ -52,6 +52,8 @@ export function getRoomoteMcpProtectedResourceMetadataUrl(
 
 const createMcpAccessTokenOptionsSchema = z.object({
   userId: z.string().min(1),
+  clientId: z.string().min(1),
+  grantId: z.string().min(1),
   resource: z.string().url(),
   scopes: z.array(z.literal(ROOMOTE_MCP_SCOPE)).min(1),
   timeoutMs: z
@@ -68,7 +70,7 @@ export type CreateMcpAccessTokenOptions = z.infer<
 export async function createMcpAccessToken(
   options: CreateMcpAccessTokenOptions,
 ): Promise<string> {
-  const { userId, resource, scopes, timeoutMs } =
+  const { userId, clientId, grantId, resource, scopes, timeoutMs } =
     createMcpAccessTokenOptionsSchema.parse(options);
   const now = Math.floor(Date.now() / 1000);
 
@@ -84,6 +86,8 @@ export async function createMcpAccessToken(
       u: userId,
       t: 'mcp',
       s: scopes,
+      c: clientId,
+      g: grantId,
     },
   };
 
@@ -112,6 +116,8 @@ export async function validateMcpAccessToken(
 
   return {
     userId: payload.r.u,
+    clientId: payload.r.c,
+    grantId: payload.r.g,
     tokenType: 'mcp',
     version: payload.v,
     resource: payload.aud,

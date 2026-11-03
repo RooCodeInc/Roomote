@@ -2,8 +2,12 @@ import { NextRequest } from 'next/server';
 
 const mockRevokeRefreshSession = vi.hoisted(() => vi.fn());
 
-vi.mock('@/lib/server/mcp-remote-oauth', () => ({
-  revokeRemoteMcpRefreshSession: mockRevokeRefreshSession,
+vi.mock('@roomote/redis', () => ({
+  getMcpOAuthRefresh: vi.fn(),
+  revokeMcpOAuthRefresh: mockRevokeRefreshSession,
+}));
+vi.mock('@/lib/server/bootstrap-runtime-env', () => ({
+  bootstrapWebRuntimeEnv: vi.fn(),
 }));
 
 import { POST } from '../route';

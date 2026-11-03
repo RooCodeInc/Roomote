@@ -19,6 +19,8 @@ import {
 import { Env } from '@roomote/env';
 import type { TaskModelOption } from '@roomote/types';
 import { createApiApp } from '../../../server';
+import { oauthGrantFixture } from './oauth-fixture';
+import { revokeMcpOAuthGrants } from '@roomote/redis';
 
 describe('model discovery through authenticated HTTP', () => {
   beforeAll(() => {
@@ -88,6 +90,7 @@ describe('model discovery through authenticated HTTP', () => {
       Env.R_PUBLIC_URL ?? Env.R_APP_URL,
     );
     const token = await createMcpAccessToken({
+      ...(await oauthGrantFixture(member.id, resource)),
       userId: member.id,
       resource,
       scopes: [ROOMOTE_MCP_SCOPE],
@@ -138,6 +141,7 @@ describe('model discovery through authenticated HTTP', () => {
       expect((await get('/mcp/models', otherToken)).body).toEqual(all.body);
       expect((await get('/mcp/models', null)).response.status).toBe(401);
       const wrong = await createMcpAccessToken({
+        ...(await oauthGrantFixture(member.id, resource)),
         userId: member.id,
         resource: 'https://wrong.example/mcp',
         scopes: [ROOMOTE_MCP_SCOPE],
@@ -173,6 +177,33 @@ describe('model discovery through authenticated HTTP', () => {
       expect(text).toContain(models[1]!.id);
       expect(text).not.toContain('Unknown action');
       expect(text).not.toContain('"isError":true');
+      await revokeMcpOAuthGrants(member.id);
+      expect((await get('/mcp/models')).response.status).toBe(401);
+      expect((await get('/mcp/task-outputs/download')).response.status).toBe(
+        401,
+      );
+      const revokedMcp = await fetch(`${base}/mcp`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          Accept: 'application/json, text/event-stream',
+        },
+        body: JSON.stringify(rpc),
+      });
+      expect(revokedMcp.status).toBe(401);
+      const reconnected = await createMcpAccessToken({
+        ...(await oauthGrantFixture(member.id, resource)),
+        userId: member.id,
+        resource,
+        scopes: [ROOMOTE_MCP_SCOPE],
+        timeoutMs: 60000,
+      });
+      expect((await get('/mcp/models', reconnected)).response.status).toBe(200);
+      expect((await get('/mcp/models')).response.status).toBe(401);
+      expect((await get('/mcp/task-outputs/download')).response.status).toBe(
+        401,
+      );
       receipts.push({
         method: 'POST',
         path: '/mcp',
