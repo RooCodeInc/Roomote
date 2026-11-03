@@ -1,17 +1,22 @@
-import type { Mock } from 'vitest';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 
 import { appRouter } from '../../routers';
 import type { Context } from '../../trpc';
 
-const { mockReadFile } = vi.hoisted(() => ({
-  mockReadFile: vi.fn(),
+const { logFileName } = vi.hoisted(() => ({
+  logFileName: `get-harness-log-${process.pid}-${Date.now()}/harness.log`,
 }));
 
-vi.mock('node:fs/promises', () => ({
-  readFile: mockReadFile,
+vi.mock('../../../logging', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../logging')>()),
+  HARNESS_LOG_FILE_NAME: logFileName,
 }));
 
-const HARNESS_LOG_PATH = '/tmp/harness.log';
+const HARNESS_LOG_PATH = `/tmp/${logFileName}`;
+const FIXTURE_DIR = HARNESS_LOG_PATH.slice(
+  0,
+  HARNESS_LOG_PATH.lastIndexOf('/'),
+);
 
 function createCaller() {
   const ctx = {
@@ -27,21 +32,21 @@ function createCaller() {
 }
 
 describe('getHarnessLog procedure', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
+  beforeAll(async () => {
+    await mkdir(FIXTURE_DIR);
+  });
+  afterEach(async () => {
+    await rm(HARNESS_LOG_PATH, { recursive: true, force: true });
+  });
+  afterAll(async () => {
+    await rm(FIXTURE_DIR, { recursive: true });
   });
 
-  it('returns the requested tail of the harness log', async () => {
-    mockReadFile.mockResolvedValueOnce(
-      ['one', 'two', 'three', 'four'].join('\n'),
-    );
-
-    const result = await createCaller().commands.getHarnessLog({
-      lineLimit: 2,
-    });
-
-    expect(mockReadFile).toHaveBeenCalledWith(HARNESS_LOG_PATH, 'utf8');
-    expect(result).toEqual({
+  it('returns the requested tail of the actual harness log', async () => {
+    await writeFile(HARNESS_LOG_PATH, 'one\ntwo\nthree\nfour');
+    expect(
+      await createCaller().commands.getHarnessLog({ lineLimit: 2 }),
+    ).toEqual({
       path: HARNESS_LOG_PATH,
       exists: true,
       requestedLines: 2,
@@ -51,21 +56,55 @@ describe('getHarnessLog procedure', () => {
   });
 
   it('returns exists=false when the harness log has not been created yet', async () => {
-    const notFoundError = Object.assign(new Error('missing'), {
-      code: 'ENOENT',
-    });
-    (mockReadFile as Mock).mockRejectedValueOnce(notFoundError);
-
-    const result = await createCaller().commands.getHarnessLog({
-      lineLimit: 5,
-    });
-
-    expect(result).toEqual({
+    expect(
+      await createCaller().commands.getHarnessLog({ lineLimit: 5 }),
+    ).toEqual({
       path: HARNESS_LOG_PATH,
       exists: false,
       requestedLines: 5,
       returnedLines: 0,
       lines: [],
     });
+  });
+
+  it.each(['\n', '\r', '\r\n'])(
+    'retains line semantics for %j endings across reads',
+    async (ending) => {
+      const longLine = '🦊'.repeat(20_000);
+      await writeFile(
+        HARNESS_LOG_PATH,
+        `old${ending}${longLine}${ending}last🐋${ending}`,
+      );
+      expect(
+        (await createCaller().commands.getHarnessLog({ lineLimit: 2 })).lines,
+      ).toEqual([longLine, 'last🐋']);
+    },
+  );
+
+  it('returns an empty tail for an existing empty file', async () => {
+    await writeFile(HARNESS_LOG_PATH, '');
+    expect(await createCaller().commands.getHarnessLog()).toMatchObject({
+      exists: true,
+      requestedLines: 200,
+      returnedLines: 0,
+      lines: [],
+    });
+  });
+
+  it('returns the default trailing window without dropping blank lines', async () => {
+    await writeFile(
+      HARNESS_LOG_PATH,
+      `${'old\n'.repeat(20_000)}${'\n'.repeat(198)}one\ntwo\n`,
+    );
+    const result = await createCaller().commands.getHarnessLog();
+    expect(result.returnedLines).toBe(200);
+    expect(result.lines).toEqual([...Array(198).fill(''), 'one', 'two']);
+  });
+
+  it('propagates read errors other than a missing log', async () => {
+    await mkdir(HARNESS_LOG_PATH);
+    await expect(createCaller().commands.getHarnessLog()).rejects.toThrow(
+      'EISDIR',
+    );
   });
 });
