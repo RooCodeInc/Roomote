@@ -164,3 +164,77 @@ for probe_mode in present absent error; do
 done
 
 printf 'Brain backup probe outcomes remain distinct.\n'
+
+# Exercise a real OpenSSL write failure without limiting the other backup
+# commands. The final output name must represent a complete encrypted bundle,
+# and removing the fault must allow the identical command to be retried.
+real_openssl=$(command -v openssl)
+export REAL_OPENSSL="$real_openssl"
+cat >"$fake_bin/openssl" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "${LIMIT_BACKUP_OUTPUT:-false}" = true ]; then
+  ulimit -c 0
+  ulimit -f 1
+fi
+"$REAL_OPENSSL" "$@"
+if [ -n "${BACKUP_COLLISION_FILE:-}" ]; then
+  printf 'concurrent output must survive\n' >"$BACKUP_COLLISION_FILE"
+fi
+EOF
+chmod +x "$fake_bin/openssl"
+
+install_root="$work_dir/output-failure"
+bundle="$install_root/backups/retry.tar.gz.enc"
+write_fixture "$install_root"
+# A large, incompressible configuration makes the native encrypted output
+# exceed the one-block file-size limit deterministically.
+mkdir -p "$install_root/caddy"
+dd if=/dev/urandom of="$install_root/caddy/Caddyfile" bs=16384 count=1 2>/dev/null
+
+if env PATH="$fake_bin:$PATH" MOCK_PROBE_MODE=present LIMIT_BACKUP_OUTPUT=true \
+  ROOMOTE_TEST_MODE=true ROOMOTE_INSTALL_ROOT="$install_root" \
+  "$roomote_cli" backup --passphrase-file "$passphrase_file" --output "$bundle" \
+  >"$work_dir/output-failure.log" 2>&1; then
+  printf 'backup unexpectedly succeeded with a real encrypted-output size limit\n' >&2
+  exit 1
+fi
+if [ -e "$bundle" ]; then
+  printf 'failed encryption published a partial backup at the final output path\n' >&2
+  exit 1
+fi
+if compgen -G "$install_root/backups/.roomote-backup.*" >/dev/null; then
+  printf 'failed encryption left a temporary encrypted output behind\n' >&2
+  exit 1
+fi
+env PATH="$fake_bin:$PATH" MOCK_PROBE_MODE=present \
+  ROOMOTE_TEST_MODE=true ROOMOTE_INSTALL_ROOT="$install_root" \
+  "$roomote_cli" backup --passphrase-file "$passphrase_file" --output "$bundle" \
+  >"$work_dir/output-retry.log" 2>&1
+inspect_bundle "$bundle" "$work_dir/output-inspection"
+cmp "$install_root/caddy/Caddyfile" "$work_dir/output-inspection/config/caddy/Caddyfile"
+(cd "$work_dir/output-inspection" && sha256sum -c SHA256SUMS >/dev/null)
+cp "$bundle" "$work_dir/completed-backup"
+if env PATH="$fake_bin:$PATH" MOCK_PROBE_MODE=present \
+  ROOMOTE_TEST_MODE=true ROOMOTE_INSTALL_ROOT="$install_root" \
+  "$roomote_cli" backup --passphrase-file "$passphrase_file" --output "$bundle" \
+  >"$work_dir/output-existing.log" 2>&1; then
+  printf 'backup unexpectedly overwrote an existing completed bundle\n' >&2
+  exit 1
+fi
+cmp "$bundle" "$work_dir/completed-backup"
+
+collision_bundle="$install_root/backups/concurrent.tar.gz.enc"
+if env PATH="$fake_bin:$PATH" MOCK_PROBE_MODE=present BACKUP_COLLISION_FILE="$collision_bundle" \
+  ROOMOTE_TEST_MODE=true ROOMOTE_INSTALL_ROOT="$install_root" \
+  "$roomote_cli" backup --passphrase-file "$passphrase_file" --output "$collision_bundle" \
+  >"$work_dir/output-collision.log" 2>&1; then
+  printf 'backup unexpectedly succeeded after another writer created its output\n' >&2
+  exit 1
+fi
+test "$(cat "$collision_bundle")" = 'concurrent output must survive'
+if compgen -G "$install_root/backups/.roomote-backup.*" >/dev/null; then
+  printf 'backup publication left a temporary encrypted output behind\n' >&2
+  exit 1
+fi
+printf 'Failed backup output stays unpublished and the same command can retry.\n'

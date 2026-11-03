@@ -876,10 +876,16 @@ EOF
   )
 
   log "Encrypting backup bundle"
-  tar -C "$staging_dir" -czf - . |
-    openssl enc -aes-256-cbc -salt -pbkdf2 -iter 200000 -md sha256 \
-      -pass "file:$passphrase_file" -out "$output_file"
-  chmod 600 "$output_file"
+  (
+    encrypted_output=$(mktemp "$(dirname -- "$output_file")/.roomote-backup.XXXXXX")
+    trap 'rm -f "$encrypted_output"' EXIT
+    tar -C "$staging_dir" -czf - . |
+      openssl enc -aes-256-cbc -salt -pbkdf2 -iter 200000 -md sha256 \
+        -pass "file:$passphrase_file" -out "$encrypted_output"
+    # Publish only the complete, mode-600 bundle. A hard link on the same
+    # filesystem also refuses a destination created since the initial check.
+    ln -T -- "$encrypted_output" "$output_file"
+  )
 
   log "Restarting Roomote"
   compose up -d --wait --wait-timeout 600
