@@ -79,7 +79,7 @@ async function createTestDatabaseLifecycle(databaseUrl: string) {
 
     for (const { table_name: tableName } of tables) {
       await connection.unsafe(
-        `TRUNCATE TABLE "${tableName.replaceAll('"', '""')}" CASCADE`,
+        `TRUNCATE TABLE "public"."${tableName.replaceAll('"', '""')}" CASCADE`,
       );
     }
   };
