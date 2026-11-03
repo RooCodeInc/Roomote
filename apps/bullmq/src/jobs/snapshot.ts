@@ -160,6 +160,25 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
     throw new Error(`Task run #${runId} not found`);
   }
 
+  // Queue entries can outlive their sandbox binding. Check before any provider
+  // or scrub call; the later persistence guard cannot undo an external snapshot.
+  if (taskRun.machineId !== instanceId) {
+    await recordSnapshotQueueEvent(taskRun, {
+      eventType: 'decision',
+      message: `Skipped snapshot request for sandbox ${instanceId} because the task run no longer owns it.`,
+      details: {
+        decision: 'skip_snapshot_sandbox_mismatch',
+        queueJobId,
+        queueAttempt,
+        snapshotIntentId,
+        triggerPath,
+        sandboxId: instanceId,
+        currentSandboxId: taskRun.machineId,
+      },
+    });
+    return;
+  }
+
   console.log(
     `[SnapshotQueue] 📸 Processing snapshot request for task run #${runId}`,
   );

@@ -22,9 +22,14 @@ import {
 } from '@roomote/db/server';
 import { RunStatus, TaskPayloadKind } from '@roomote/types';
 
-const { mockGetInstanceStatus, mockCreateSnapshot } = vi.hoisted(() => ({
+const {
+  mockGetInstanceStatus,
+  mockCreateSnapshot,
+  mockWithSandboxServerRpcClient,
+} = vi.hoisted(() => ({
   mockGetInstanceStatus: vi.fn(),
   mockCreateSnapshot: vi.fn(),
+  mockWithSandboxServerRpcClient: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('@roomote/compute-providers', () => ({
@@ -48,7 +53,7 @@ vi.mock('@roomote/slack', () => ({
 
 vi.mock('@roomote/sdk/server', () => ({
   maybeEnqueueBrainMemoryForCompletedRun: vi.fn().mockResolvedValue(undefined),
-  withSandboxServerRpcClient: vi.fn().mockResolvedValue(undefined),
+  withSandboxServerRpcClient: mockWithSandboxServerRpcClient,
 }));
 
 vi.mock('../compute-provider-usage', () => ({
@@ -143,6 +148,36 @@ describe('snapshot id persistence (real database)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
+
+  it.each(['sb-replacement', null])(
+    'ignores a queued request when the run now owns %s',
+    async (machineId) => {
+      const run = await createIdleRunAwaitingSnapshot();
+      await db
+        .update(taskRuns)
+        .set({ machineId, sandboxServerUrl: 'https://sandbox.example.test' })
+        .where(eq(taskRuns.id, run.id));
+      const before = await readRun(run.id);
+      mockGetInstanceStatus.mockResolvedValue({ status: 'running' });
+      mockCreateSnapshot.mockImplementation(async ({ onSnapshotCreated }) => {
+        await onSnapshotCreated?.('im-stale-sandbox');
+        return { snapshotId: 'im-stale-sandbox' };
+      });
+
+      await expect(snapshotJob(buildJob(run.id, 0))).resolves.toBeUndefined();
+
+      expect(mockGetInstanceStatus).not.toHaveBeenCalled();
+      expect(mockCreateSnapshot).not.toHaveBeenCalled();
+      expect(mockWithSandboxServerRpcClient).not.toHaveBeenCalled();
+      expect(await readRun(run.id)).toEqual(before);
+      const events = await db.query.taskRunEvents.findMany({
+        where: eq(taskRunEvents.runId, run.id),
+      });
+      expect(events.map((event) => event.details?.decision)).toContain(
+        'skip_snapshot_sandbox_mismatch',
+      );
+    },
+  );
 
   it('records the snapshot id while the attempt is still in flight', async () => {
     const run = await createIdleRunAwaitingSnapshot();
