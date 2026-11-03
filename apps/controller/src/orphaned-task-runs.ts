@@ -46,7 +46,8 @@ async function claimOrphanedTaskRun(): Promise<TaskRun | null> {
         LIMIT 1
       )
       UPDATE task_runs
-      SET status = ${RunStatus.Dequeued}, dequeued_at = NOW()
+      SET status = ${RunStatus.Dequeued},
+          dequeued_at = GREATEST(clock_timestamp() AT TIME ZONE 'UTC', task_runs.dequeued_at + INTERVAL '1 millisecond')
       FROM candidate
       WHERE task_runs.id = candidate.id
       RETURNING task_runs.id
