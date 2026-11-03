@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 
 import {
   Button,
@@ -140,7 +141,7 @@ export function PendingIntegrationToolApprovals({
   ) => {
     setBusyId(approvalId);
     try {
-      await fetch(
+      const response = await fetch(
         `/api/sessions/${encodeURIComponent(sessionId)}/integration-tool-approvals`,
         {
           method: 'POST',
@@ -149,6 +150,9 @@ export function PendingIntegrationToolApprovals({
           body: JSON.stringify({ approvalId, decision }),
         },
       );
+      if (!response.ok) throw new Error('Unavailable');
+    } catch {
+      toast.error('Could not save your decision. Try again.');
     } finally {
       setBusyId(null);
       await queryClient.invalidateQueries({
