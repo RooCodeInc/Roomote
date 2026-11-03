@@ -453,6 +453,7 @@ describe('MockAgentMailServer', () => {
       subject: 'Flaky login test',
       text: 'Hi Roomote — can you look into the flaky login test?',
       extracted_text: 'Hi Roomote — can you look into the flaky login test?',
+      authentication_results: { spf: 'pass', dkim: 'pass', dmarc: 'pass' },
       attachments: [],
     });
     expect(payload.thread).toEqual({
@@ -594,7 +595,44 @@ describe('MockAgentMailServer', () => {
     );
     expect(fetched.body.text).toBe('pretend this is 2MB of text');
     expect(fetched.body.html).toBe('<p>pretend this is 2MB of html</p>');
+    expect(fetched.body.authentication_results).toEqual({
+      spf: 'pass',
+      dkim: 'pass',
+      dmarc: 'pass',
+    });
   });
+
+  it.each([{ dmarc: 'fail', spf: 'pass' }, null])(
+    'preserves explicit authentication verdicts %j in the webhook and message resource',
+    async (authenticationResults) => {
+      const received: ReceivedDelivery[] = [];
+      const listener = await startStubWebhook(received);
+      onCleanup(() => listener.stop());
+      const { server, baseUrl } = await startServer();
+      onCleanup(() => server.stop());
+      await api(baseUrl, 'POST', '/v0/webhooks', { url: listener.url });
+      const result = await server.dispatch({
+        inboxId: INBOX_ID,
+        from: 'grace@example.com',
+        text: 'Authentication control',
+        authenticationResults,
+      });
+      const payload = JSON.parse(received[0]!.body) as {
+        message: Record<string, unknown>;
+      };
+      const fetched = await api(
+        baseUrl,
+        'GET',
+        `/v0/inboxes/${encodeURIComponent(INBOX_ID)}/messages/${result.messageId}`,
+      );
+      expect(payload.message.authentication_results).toEqual(
+        authenticationResults ?? undefined,
+      );
+      expect(fetched.body.authentication_results).toEqual(
+        authenticationResults ?? undefined,
+      );
+    },
+  );
 
   it('stamps an Auto-Submitted header on autoSubmitted events', async () => {
     const received: ReceivedDelivery[] = [];

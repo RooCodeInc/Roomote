@@ -6,6 +6,7 @@ import {
   type ServerResponse,
 } from 'node:http';
 import { AddressInfo } from 'node:net';
+import type { AgentMailMessage } from './agentmail-event';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -70,6 +71,7 @@ export type MockAgentMailStoredMessage = {
   references?: string[];
   /** Extra RFC 5322 headers, e.g. `auto-submitted` for automated senders. */
   headers?: Record<string, string>;
+  authentication_results?: AgentMailMessage['authentication_results'];
 };
 
 type MockAgentMailWebhookDelivery = {
@@ -131,6 +133,8 @@ export type MockAgentMailInboundEmail = {
   autoSubmitted?: boolean;
   oversize?: boolean;
   duplicate?: boolean;
+  /** Defaults to passing provider verdicts; null omits them for rejection tests. */
+  authenticationResults?: AgentMailMessage['authentication_results'] | null;
 };
 
 /**
@@ -625,6 +629,15 @@ export class MockAgentMailServer {
       ...(email.text !== undefined ? { text: email.text } : {}),
       ...(email.html !== undefined ? { html: email.html } : {}),
       timestamp: email.timestamp ?? new Date().toISOString(),
+      ...(email.authenticationResults === null
+        ? {}
+        : {
+            authentication_results: email.authenticationResults ?? {
+              spf: 'pass',
+              dkim: 'pass',
+              dmarc: 'pass',
+            },
+          }),
       ...(previous
         ? {
             in_reply_to: previous.message_id,
@@ -671,6 +684,9 @@ export class MockAgentMailServer {
               ...(message.html !== undefined ? { html: message.html } : {}),
             }),
         timestamp: message.timestamp,
+        ...(message.authentication_results !== undefined
+          ? { authentication_results: message.authentication_results }
+          : {}),
         ...(message.in_reply_to !== undefined
           ? { in_reply_to: message.in_reply_to }
           : {}),
