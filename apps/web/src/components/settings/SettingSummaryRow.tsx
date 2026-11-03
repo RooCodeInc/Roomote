@@ -27,6 +27,7 @@ export function SettingSummaryRow({
         </span>
         {action ?? (
           <Button
+            aria-label={actionLabel === 'Edit' ? `Edit ${label}` : actionLabel}
             type="button"
             variant="link"
             size="sm"

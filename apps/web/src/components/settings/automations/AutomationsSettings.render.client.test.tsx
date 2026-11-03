@@ -1040,7 +1040,9 @@ function editSummaryRow(label: string) {
   const labelNode = screen.getByText(`${label}:`, { exact: true });
   const summary = labelNode.parentElement;
   if (!summary) throw new Error(`Missing summary row for ${label}`);
-  fireEvent.click(within(summary).getByRole('button', { name: 'Edit' }));
+  fireEvent.click(
+    within(summary).getByRole('button', { name: `Edit ${label}` }),
+  );
 }
 
 function setRunnableCustomAutomation(launchCriteria?: string) {
@@ -1205,7 +1207,9 @@ describe('AutomationsSettings', () => {
     const dialog = screen.getByRole('dialog', {
       name: 'Call Roomote via emoji',
     });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Edit' }));
+    fireEvent.click(
+      within(dialog).getByRole('button', { name: 'Edit Emoji reactions' }),
+    );
     fireEvent.click(
       within(dialog).getByRole('switch', { name: 'Emoji reactions enabled' }),
     );

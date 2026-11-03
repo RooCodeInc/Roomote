@@ -1467,6 +1467,7 @@ export function CustomAutomationsSection({
               onOpenChange={setModelPickerOpen}
               trigger={
                 <Button
+                  aria-label="Edit Model"
                   type="button"
                   variant="link"
                   size="sm"
