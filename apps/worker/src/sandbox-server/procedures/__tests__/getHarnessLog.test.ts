@@ -1,4 +1,4 @@
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, open, rm, writeFile } from 'node:fs/promises';
 
 import { appRouter } from '../../routers';
 import type { Context } from '../../trpc';
@@ -90,6 +90,35 @@ describe('getHarnessLog procedure', () => {
       lines: [],
     });
   });
+
+  it.each(['', '\n', '\r', '\r\n'])(
+    'does not read a large discarded line before a short tail ending with %j',
+    async (ending) => {
+      await writeFile(
+        HARNESS_LOG_PATH,
+        `${'x'.repeat(8 * 1024 * 1024)}\none\ntwo${ending}`,
+      );
+      const file = await open(HARNESS_LOG_PATH, 'r');
+      const prototype = Object.getPrototypeOf(file) as typeof file;
+      await file.close();
+      const reads = vi.spyOn(prototype, 'read');
+      try {
+        expect(
+          (await createCaller().commands.getHarnessLog({ lineLimit: 2 })).lines,
+        ).toEqual(['one', 'two']);
+        const results = await Promise.all(
+          reads.mock.results.map((result) => result.value),
+        );
+        const bytesRead = results.reduce(
+          (total, result) => total + result.bytesRead,
+          0,
+        );
+        expect(bytesRead).toBeLessThan(1024 * 1024);
+      } finally {
+        reads.mockRestore();
+      }
+    },
+  );
 
   it('returns the default trailing window without dropping blank lines', async () => {
     await writeFile(

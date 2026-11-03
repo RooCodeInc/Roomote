@@ -31,13 +31,18 @@ async function readTailLines(
     const chunks: Buffer[] = [];
     let lineBreaks = 0;
     let nextByte = -1;
+    let boundariesNeeded = lineLimit;
 
-    // Read one extra line boundary so a partial first line is never returned.
-    while (end > 0 && lineBreaks <= lineLimit) {
+    // A final terminator creates the empty line that tailLines removes.
+    // Unterminated tails need no extra boundary before their first line.
+    while (end > 0 && lineBreaks < boundariesNeeded) {
       const start = Math.max(0, end - READ_CHUNK_BYTES);
       const buffer = Buffer.allocUnsafe(end - start);
       const { bytesRead } = await file.read(buffer, 0, buffer.length, start);
       const chunk = buffer.subarray(0, bytesRead);
+      if (chunks.length === 0 && (chunk.at(-1) === 10 || chunk.at(-1) === 13)) {
+        boundariesNeeded += 1;
+      }
       chunks.push(chunk);
       for (let index = bytesRead - 1; index >= 0; index -= 1) {
         const byte = chunk[index]!;
