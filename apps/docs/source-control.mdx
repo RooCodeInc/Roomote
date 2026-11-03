@@ -31,18 +31,23 @@ Before connecting source control, make sure your deployment has:
 2. an admin or bot identity with access to the repositories Roomote should use
 3. provider credentials saved in setup, Settings, or deployment environment
    variables
-4. at least one environment that can use the synced repositories
+
+A saved environment is optional. For repository execution, configure a
+[sandbox provider](/compute), then start a task against a connected repository
+directly or choose an [environment](/environments) with reusable setup commands,
+services, and preview ports. Follow [Run your first task](/first-task) to verify
+the repository-only path.
 
 After setup, verify that Roomote can:
 
 - list the expected repositories
-- create or update an environment from a repository
+- start a task against a connected repository
 - clone the repository inside a task sandbox
 - push a branch or open a reviewable change when the task finishes
 
 ## Manage pull requests from tasks
 
-During an environment-backed task, Roomote can update, close, or reopen pull
+During a task, Roomote can update, close, or reopen pull
 requests and merge requests on GitHub, GitLab, Gitea, Bitbucket Cloud, and Azure
 DevOps. Updates can change the target branch, title, description, or draft state
 when the provider exposes that capability. Gitea cannot clear a native draft
