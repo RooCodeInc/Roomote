@@ -38,6 +38,7 @@ function CommandDialog({
   disableAutoFocus = false,
   value,
   onValueChange,
+  filter,
   ...props
 }: React.ComponentProps<typeof Dialog> & {
   title?: string;
@@ -47,6 +48,7 @@ function CommandDialog({
   disableAutoFocus?: boolean;
   value?: string;
   onValueChange?: (value: string) => void;
+  filter?: React.ComponentProps<typeof CommandPrimitive>['filter'];
 }) {
   return (
     <Dialog {...props}>
@@ -69,6 +71,7 @@ function CommandDialog({
         <Command
           value={value}
           onValueChange={onValueChange}
+          filter={filter}
           className="[&_[cmdk-group-heading]]:text-muted-foreground **:data-[slot=command-input-wrapper]:h-12 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group]]:px-2 [&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-input-wrapper]_svg]:h-5 [&_[cmdk-input-wrapper]_svg]:w-5 [&_[cmdk-input]]:h-12 [&_[cmdk-item]]:py-3 [&_[cmdk-item]_svg]:h-5 [&_[cmdk-item]_svg]:w-5"
         >
           {children}
