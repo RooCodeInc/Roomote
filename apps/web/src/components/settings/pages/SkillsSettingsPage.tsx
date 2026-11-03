@@ -233,7 +233,12 @@ function AddCustomSkillDialog({
                     Tell the agent when to use this skill.
                   </p>
                   <FormControl>
-                    <Textarea {...field} rows={2} maxLength={1024} />
+                    <Textarea
+                      {...field}
+                      rows={2}
+                      maxLength={1024}
+                      disabled={isSaving}
+                    />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -248,6 +253,7 @@ function AddCustomSkillDialog({
                   <FormControl>
                     <Textarea
                       {...field}
+                      disabled={isSaving}
                       rows={22}
                       spellCheck={false}
                       className="font-mono text-xs"
