@@ -112,6 +112,105 @@ const validAuthTokenContext = {
 } satisfies AuthTokenContext;
 
 describe('sandbox server transports', () => {
+  it.each(['accept', 'reject'])(
+    'closes terminal sockets before pending authentication can %s',
+    async (outcome) => {
+      let finishAuthentication: (() => void) | undefined;
+      let authenticationStarted: (() => void) | undefined;
+      const started = new Promise<void>((resolve) => {
+        authenticationStarted = resolve;
+      });
+      const sandbox = await startSandboxServer(() => {
+        authenticationStarted?.();
+        return new Promise<RunTokenContext>((resolve, reject) => {
+          finishAuthentication = () =>
+            outcome === 'accept'
+              ? resolve(validRunTokenContext)
+              : reject(new Error('late authentication failure'));
+        });
+      });
+      const socket = new WebSocket(
+        `ws://127.0.0.1:${sandbox.port}/ws/terminal?token=ok-token`,
+      );
+      socket.on('error', () => {});
+      const closed = new Promise<void>((resolve) =>
+        socket.once('close', () => resolve()),
+      );
+      let closing: Promise<void> | undefined;
+      try {
+        await started;
+        closing = sandbox.close();
+        await expect(
+          Promise.race([
+            closing.then(() => 'closed'),
+            new Promise((resolve) =>
+              setTimeout(() => resolve('server still closing'), 1000),
+            ),
+          ]),
+        ).resolves.toBe('closed');
+        await expect(
+          Promise.race([
+            closed.then(() => 'transport closed'),
+            new Promise((resolve) =>
+              setTimeout(() => resolve('transport still open'), 1000),
+            ),
+          ]),
+        ).resolves.toBe('transport closed');
+        finishAuthentication?.();
+        await new Promise((resolve) => setImmediate(resolve));
+      } finally {
+        finishAuthentication?.();
+        socket.terminate();
+        await closed;
+        await (closing ?? sandbox.close());
+      }
+    },
+  );
+
+  it('closes active HTTP subscriptions before disposing the harness', async () => {
+    const sandbox = await startSandboxServer(
+      vi.fn().mockResolvedValue(validRunTokenContext),
+    );
+    const abort = new AbortController();
+    const dispose = vi.spyOn(sandbox.harness, 'dispose');
+    let closing: Promise<void> | undefined;
+
+    try {
+      const response = await fetch(
+        `http://127.0.0.1:${sandbox.port}/trpc/commands.sandboxStream`,
+        {
+          headers: { Authorization: 'Bearer ok-token' },
+          signal: abort.signal,
+        },
+      );
+      expect(response.status).toBe(200);
+      expect(response.headers.get('content-type')).toContain(
+        'text/event-stream',
+      );
+      const reader = response.body!.getReader();
+      await reader.read();
+      expect(sandbox.harness.listenerCount('runtimeOutput')).toBe(1);
+
+      closing = sandbox.close();
+      await expect(
+        Promise.race([
+          closing.then(() => 'closed'),
+          new Promise((resolve) =>
+            setTimeout(() => resolve('still open'), 1_000),
+          ),
+        ]),
+      ).resolves.toBe('closed');
+      expect(dispose).toHaveBeenCalledOnce();
+      await vi.waitFor(() => {
+        expect(sandbox.harness.listenerCount('runtimeOutput')).toBe(0);
+        expect(sandbox.harnessManager.listenerCount('stateChange')).toBe(0);
+      });
+    } finally {
+      abort.abort();
+      await (closing ?? sandbox.close());
+    }
+  });
+
   it('allows private-network preflight requests from ngrok-hosted pages', async () => {
     const sandbox = await startSandboxServer(vi.fn());
 

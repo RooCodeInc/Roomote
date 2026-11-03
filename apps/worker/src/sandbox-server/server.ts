@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import type { Socket } from 'node:net';
 import { cors } from 'hono/cors';
 import { serve } from '@hono/node-server';
 import { TRPCError } from '@trpc/server';
@@ -222,6 +223,11 @@ export function createServer({
     console.log(`[SandboxServer] Listening on ${url}`);
     console.log(`[SandboxServer] Working directory: ${workingDirectory}`);
   });
+  const sockets = new Set<Socket>();
+  server.on('connection', (socket: Socket) => {
+    sockets.add(socket);
+    socket.once('close', () => sockets.delete(socket));
+  });
 
   // Attach WebSocket servers for terminal sessions and tRPC.
   const terminalWss = new WebSocketServer({ noServer: true });
@@ -289,10 +295,12 @@ export function createServer({
 
       validateToken(token)
         .then((auth) => {
+          if (socket.destroyed) return;
           authorizeSandboxToken(auth, { runId });
           upgradeAndConnect();
         })
         .catch((error) => {
+          if (socket.destroyed) return;
           console.error(
             `[WebSocketServer] Unauthorized: Token validation failed: ${error instanceof Error ? error.message : String(error)}`,
           );
@@ -333,6 +341,12 @@ export function createServer({
         }),
         new Promise<void>((resolve) => {
           server.close(() => resolve());
+          // Pending upgrades are not WebSocket clients yet, and HTTP-only
+          // closeAllConnections leaves upgraded sockets open. Stop accepting
+          // first, then close every accepted connection before disposal.
+          for (const socket of sockets) {
+            socket.destroy();
+          }
         }),
       ]);
 
