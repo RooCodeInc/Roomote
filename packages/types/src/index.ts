@@ -130,3 +130,4 @@ export * from './secret-redaction';
 export * from './credential-egress';
 export * from './public-url-fetch';
 export * from './vulnerability-watch';
+export * from './agent-safety';

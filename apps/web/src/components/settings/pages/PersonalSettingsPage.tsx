@@ -8,6 +8,7 @@ import {
 import { ChangePasswordSection } from '@/components/settings/ChangePasswordSection';
 import { LinkedAccounts } from '@/components/settings/LinkedAccounts';
 import { PersonalIntegrations } from '@/components/settings/PersonalIntegrations';
+import { ConnectedMcpClients } from '@/components/settings/ConnectedMcpClients';
 import { BrowserNotificationsSection } from '@/components/settings/BrowserNotificationsSection';
 import {
   PersonalizationSection,
@@ -37,6 +38,7 @@ export function PersonalSettingsPage({
       <PersonalizationSection />
       <LinkedAccounts />
       <PersonalIntegrations />
+      <ConnectedMcpClients />
     </SettingsShell>
   );
 }

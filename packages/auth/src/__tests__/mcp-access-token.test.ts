@@ -46,6 +46,8 @@ describe('MCP access tokens', () => {
     await expect(
       createMcpAccessToken({
         userId: 'user-1',
+        clientId: 'client',
+        grantId: 'grant',
         resource,
         scopes: [ROOMOTE_MCP_SCOPE],
         timeoutMs: 60_000,
@@ -56,7 +58,13 @@ describe('MCP access tokens', () => {
       expect.objectContaining({
         sub: 'user-1',
         aud: resource,
-        r: { u: 'user-1', t: 'mcp', s: [ROOMOTE_MCP_SCOPE] },
+        r: {
+          u: 'user-1',
+          t: 'mcp',
+          s: [ROOMOTE_MCP_SCOPE],
+          c: 'client',
+          g: 'grant',
+        },
       }),
       testKeyPair.privateKey,
       { algorithm: 'ES256' },
@@ -73,16 +81,39 @@ describe('MCP access tokens', () => {
       iat: now,
       nbf: now - 1,
       v: 1,
-      r: { u: 'user-1', t: 'mcp', s: [ROOMOTE_MCP_SCOPE] },
+      r: {
+        u: 'user-1',
+        t: 'mcp',
+        s: [ROOMOTE_MCP_SCOPE],
+        c: 'client',
+        g: 'grant',
+      },
     });
 
     await expect(validateMcpAccessToken('token')).resolves.toEqual({
       userId: 'user-1',
+      clientId: 'client',
+      grantId: 'grant',
       tokenType: 'mcp',
       version: 1,
       resource,
       scopes: [ROOMOTE_MCP_SCOPE],
     });
+  });
+
+  it('rejects legacy JWTs without a grant identity', async () => {
+    const now = Math.floor(Date.now() / 1000);
+    mockJwtVerify.mockReturnValue({
+      iss: 'rcc',
+      sub: 'user-1',
+      aud: resource,
+      exp: now + 60,
+      iat: now,
+      nbf: now - 1,
+      v: 1,
+      r: { u: 'user-1', t: 'mcp', s: [ROOMOTE_MCP_SCOPE] },
+    });
+    await expect(validateMcpAccessToken('legacy')).rejects.toThrow();
   });
 
   it('preserves a single-origin API proxy prefix in MCP URLs', () => {

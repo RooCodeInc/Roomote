@@ -74,6 +74,8 @@ it('does not interchange broker tokens with ordinary auth, run or public MCP tok
       timeoutMs: 60_000,
     }),
     await createMcpAccessToken({
+      clientId: 'client',
+      grantId: 'grant',
       userId: identity.userId,
       resource: 'https://api.example.com/mcp',
       scopes: ['mcp:roomote'],

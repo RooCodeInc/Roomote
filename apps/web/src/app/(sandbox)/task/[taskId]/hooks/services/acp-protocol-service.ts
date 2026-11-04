@@ -1845,6 +1845,7 @@ export class AcpProtocolService {
       if (
         envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt ||
         envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage ||
+        envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.AgentSafetyStop ||
         envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantThought
       ) {
         const message = toAcpUiMessage(envelope);

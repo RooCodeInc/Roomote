@@ -1,5 +1,6 @@
 import {
   ACP_ENVELOPE_EVENT_TYPES,
+  AGENT_SAFETY,
   TaskEventName,
   type AcpPersistedEnvelope,
   type TaskEvent,
@@ -15,8 +16,7 @@ import type {
 } from '../opencode-server/types';
 
 const TEST_OPENCODE_MODEL = 'test-provider/main-model';
-// Far beyond any plausible run length: subagent runs are not time-bounded, so
-// nothing may abort even at this horizon.
+// Legacy subtask markers without a running child do not start an execution pass.
 const SIX_HOURS_MS = 6 * 60 * 60_000;
 
 class FakeOpenCodeServerClient {
@@ -240,12 +240,272 @@ describe('OpenCode subagent run tracking', () => {
     vi.useRealTimers();
   });
 
-  it('never aborts a foreground child, no matter how long it runs', async () => {
+  it.each(['judge', 'explore', 'general', 'code-review'])(
+    'stops repeated empty grep in %s, releases the parent, and suppresses late retries',
+    async (agent) => {
+      const client = new FakeOpenCodeServerClient();
+      const onSafetyStop = vi.fn(async () => undefined);
+      const harness = new OpenCodeServerHarness({
+        client: client as unknown as OpenCodeServerClient,
+        workspacePath: '/tmp/workspace',
+        logger: createLogger(),
+        model: TEST_OPENCODE_MODEL,
+        onSafetyStop,
+      });
+      const events: TaskEvent[] = [];
+      harness.on('taskEvent', (event) => events.push(event));
+      try {
+        await connectHarness(harness, client);
+        await armSpawn(client, harness);
+        await client.emit({
+          type: 'message.part.updated',
+          properties: {
+            part: createTaskToolPart({
+              input: { subagent_type: agent },
+              metadata: { sessionId: 'ses_child_1' },
+            }),
+          },
+        });
+        await client.emit({
+          type: 'session.created',
+          properties: {
+            info: { id: 'ses_grandchild', parentID: 'ses_child_1' },
+          },
+        });
+        for (let index = 0; index < 1_000; index++) {
+          const part = {
+            ...createChildToolPart({
+              callId: `grep-${index}`,
+              tool: 'grep',
+              status: 'completed',
+            }),
+            state: {
+              status: 'completed',
+              input: { pattern: 'missing-snapshot' },
+              output: '',
+            },
+          };
+          await client.emit({
+            type: 'message.part.updated',
+            properties: { part },
+          });
+        }
+        expect(onSafetyStop).toHaveBeenCalledExactlyOnceWith(
+          'identical_tool_loop',
+          expect.objectContaining({
+            sessionId: 'ses_child_1',
+            completedTools: 5,
+            identicalCompletions: 5,
+          }),
+        );
+        expect(
+          new Set(client.abort.mock.calls.map(([call]) => call.sessionId)),
+        ).toEqual(new Set(['ses_1', 'ses_child_1', 'ses_grandchild']));
+        expect(
+          events.filter(
+            (event) => event.eventName === TaskEventName.TaskAborted,
+          ),
+        ).toHaveLength(1);
+        await client.emit({
+          type: 'session.created',
+          properties: { info: { id: 'late-child', parentID: 'ses_child_1' } },
+        });
+        expect(client.abort).toHaveBeenCalledWith(
+          expect.objectContaining({ sessionId: 'late-child' }),
+        );
+        await client.emit({
+          type: 'session.status',
+          properties: {
+            sessionID: 'ses_1',
+            status: { type: 'retry', attempt: 1, message: 'temporary error' },
+          },
+        });
+        await client.emit({
+          type: 'session.idle',
+          properties: { sessionID: 'ses_1' },
+        });
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+        expect(
+          harness.sendCommand({
+            commandName: TaskCommandName.SendMessage,
+            data: { text: 'continue' },
+          }),
+        ).toBe(false);
+      } finally {
+        harness.dispose();
+      }
+    },
+  );
+
+  it('ignores duplicate completed events and allows changed results', async () => {
+    const { client, harness } = createHarness();
+    try {
+      await connectHarness(harness, client);
+      await armSpawn(client, harness);
+      for (let index = 0; index < 20; index++) {
+        const part = {
+          ...createChildToolPart({
+            callId: `grep-${Math.floor(index / 2)}`,
+            tool: 'grep',
+            status: 'completed',
+          }),
+          state: {
+            status: 'completed',
+            input: {},
+            output: String(Math.floor(index / 2)),
+          },
+        };
+        await client.emit({
+          type: 'message.part.updated',
+          properties: { part },
+        });
+      }
+      expect(client.abort).not.toHaveBeenCalled();
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('releases the task even when durable stop delivery and child abort requests fail', async () => {
+    const client = new FakeOpenCodeServerClient();
+    client.abort.mockRejectedValue(new Error('server unavailable'));
+    const harness = new OpenCodeServerHarness({
+      client: client as unknown as OpenCodeServerClient,
+      workspacePath: '/tmp/workspace',
+      logger: createLogger(),
+      model: TEST_OPENCODE_MODEL,
+      onSafetyStop: vi.fn().mockRejectedValue(new Error('API unavailable')),
+    });
+    const events: TaskEvent[] = [];
+    harness.on('taskEvent', (event) => events.push(event));
+    try {
+      await connectHarness(harness, client);
+      await armSpawn(client, harness);
+      for (let index = 0; index < 5; index++)
+        await client.emit({
+          type: 'message.part.updated',
+          properties: {
+            part: {
+              ...createChildToolPart({
+                callId: String(index),
+                tool: 'grep',
+                status: 'completed',
+              }),
+              state: { status: 'completed', input: {}, output: '' },
+            },
+          },
+        });
+      expect(
+        events.filter((event) => event.eventName === TaskEventName.TaskAborted),
+      ).toHaveLength(1);
+      expect(client.abort).toHaveBeenCalledTimes(2);
+      expect(client.promptAsync).toHaveBeenCalledTimes(1);
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('does not re-arm completed passes from late duplicate task and child events', async () => {
+    vi.useFakeTimers();
+    const { client, harness } = createHarness();
+    try {
+      await connectHarness(harness, client);
+      await armSpawn(client, harness);
+      const complete = {
+        type: 'message.part.updated',
+        properties: {
+          part: createTaskToolPart({
+            status: 'completed',
+            metadata: { sessionId: 'ses_child_1' },
+          }),
+        },
+      };
+      await client.emit(complete);
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
+      });
+      await client.emit(complete);
+      await client.emit({
+        type: 'session.updated',
+        properties: { info: { id: 'ses_child_1', parentID: 'ses_1' } },
+      });
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: createChildToolPart({ callId: 'old', status: 'completed' }),
+        },
+      });
+      await vi.advanceTimersByTimeAsync(AGENT_SAFETY.passTimeoutMs + 1_000);
+      expect(client.abort).not.toHaveBeenCalled();
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('does not extend an older pass deadline when a sibling starts or child progress arrives', async () => {
+    vi.useFakeTimers();
+    const { client, harness } = createHarness();
+    try {
+      await connectHarness(harness, client);
+      await armSpawn(client, harness);
+      await vi.advanceTimersByTimeAsync(AGENT_SAFETY.passTimeoutMs / 2);
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: createTaskToolPart({
+            callId: 'second-spawn',
+            metadata: { sessionId: 'ses_child_2' },
+          }),
+        },
+      });
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: createChildToolPart({ callId: 'useful-progress' }),
+        },
+      });
+      await vi.advanceTimersByTimeAsync(AGENT_SAFETY.passTimeoutMs / 2 + 1_000);
+      expect(client.abort).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: 'ses_1' }),
+      );
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('caps unique model steps even without tool calls', async () => {
+    const { client, harness } = createHarness();
+    try {
+      await connectHarness(harness, client);
+      await armSpawn(client, harness);
+      for (let index = 0; index < 100; index++) {
+        await client.emit({
+          type: 'message.updated',
+          properties: {
+            info: {
+              id: `step-${index}`,
+              sessionID: 'ses_child_1',
+              role: 'assistant',
+              time: { created: Date.now() },
+            },
+          },
+        });
+      }
+      expect(client.abort).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: 'ses_1' }),
+      );
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('bounds a foreground child independently of activity', async () => {
+    vi.useFakeTimers();
     const { client, harness } = createHarness();
 
     try {
       await connectHarness(harness, client);
-      vi.useFakeTimers();
 
       await client.emit({
         type: 'message.part.updated',
@@ -256,42 +516,44 @@ describe('OpenCode subagent run tracking', () => {
           }),
         },
       });
-      await vi.advanceTimersByTimeAsync(SIX_HOURS_MS);
+      await vi.advanceTimersByTimeAsync(AGENT_SAFETY.passTimeoutMs + 1_000);
 
-      expect(client.abort).not.toHaveBeenCalled();
+      expect(client.abort).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: 'ses_child_1' }),
+      );
       expect(client.children).not.toHaveBeenCalled();
     } finally {
       harness.dispose();
     }
   });
 
-  it('never aborts a spawn whose child session id is unknown', async () => {
+  it('bounds a spawn even before its child session id arrives', async () => {
+    vi.useFakeTimers();
     const { client, harness } = createHarness();
 
     try {
       await connectHarness(harness, client);
-      vi.useFakeTimers();
 
       await client.emit({
         type: 'message.part.updated',
         properties: { part: createTaskToolPart({ status: 'pending' }) },
       });
 
-      await vi.advanceTimersByTimeAsync(SIX_HOURS_MS);
+      await vi.advanceTimersByTimeAsync(AGENT_SAFETY.passTimeoutMs + 1_000);
 
-      expect(client.abort).not.toHaveBeenCalled();
+      expect(client.abort).toHaveBeenCalled();
       expect(client.children).not.toHaveBeenCalled();
     } finally {
       harness.dispose();
     }
   });
 
-  it('never aborts a child that goes silent between tools', async () => {
+  it('bounds a child that goes silent between tools', async () => {
+    vi.useFakeTimers();
     const { client, harness } = createHarness();
 
     try {
       await connectHarness(harness, client);
-      vi.useFakeTimers();
       await armSpawn(client, harness);
 
       await client.emit({
@@ -307,11 +569,11 @@ describe('OpenCode subagent run tracking', () => {
         },
       });
 
-      // Silence after the completed tool: a reasoning model may think for a
-      // long stretch without emitting any events. Nothing may kill it.
-      await vi.advanceTimersByTimeAsync(SIX_HOURS_MS);
+      await vi.advanceTimersByTimeAsync(AGENT_SAFETY.passTimeoutMs + 1_000);
 
-      expect(client.abort).not.toHaveBeenCalled();
+      expect(client.abort).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: 'ses_child_1' }),
+      );
       expect(client.children).not.toHaveBeenCalled();
     } finally {
       await harness.dispose();

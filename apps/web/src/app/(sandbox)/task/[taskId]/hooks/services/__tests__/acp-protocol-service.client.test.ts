@@ -82,6 +82,32 @@ function subagentActivityUpdate(
 }
 
 describe('AcpProtocolService', () => {
+  it('renders durable safety notices on history reload without requiring a live model event', () => {
+    const service = new AcpProtocolService();
+    const event = {
+      ...assistantChunk('Stopped at a safety limit. Review partial work.', 1),
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AgentSafetyStop,
+    };
+    const history = service.loadAcpEnvelopes([
+      {
+        ...event,
+        taskId: 'task-1',
+        createdAt: event.ts,
+        sequence: 0,
+        protocol: 'roomote_runtime',
+        userId: null,
+        userName: null,
+        userEmail: null,
+        userImageUrl: null,
+      },
+    ]);
+    expect(history.acpMessages).toHaveLength(1);
+    expect(history.acpMessages[0]).toMatchObject({
+      kind: 'text',
+      text: event.text,
+      role: 'assistant',
+    });
+  });
   describe.each(['live', 'history'] as const)('%s tool replay', (mode) => {
     it.each([
       {

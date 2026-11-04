@@ -5,7 +5,11 @@ import type { TaskModelOption } from '@roomote/types';
 import type { Variables } from '../../../types';
 import { listMemberModels } from '../models';
 
-const { options } = vi.hoisted(() => ({ options: vi.fn() }));
+const { options, grantLive } = vi.hoisted(() => ({
+  options: vi.fn(),
+  grantLive: vi.fn(),
+}));
+vi.mock('@roomote/redis', () => ({ isMcpOAuthGrantLive: grantLive }));
 vi.mock('@roomote/db/server', async (original) => ({
   ...(await original<typeof import('@roomote/db/server')>()),
   getDeploymentTaskModelOptions: options,
@@ -33,7 +37,16 @@ function app(
 }
 
 describe('member model discovery', () => {
-  beforeEach(() => options.mockReset());
+  beforeEach(() => {
+    options.mockReset();
+    grantLive
+      .mockReset()
+      .mockImplementation(
+        async (auth) =>
+          auth.clientId === 'fixture-client' &&
+          auth.grantId === 'fixture-grant',
+      );
+  });
 
   it('bounds large catalogs and traverses IDs without gaps or duplicates', async () => {
     const models = Array.from({ length: 235 }, (_, i) =>
@@ -133,6 +146,8 @@ describe('member model discovery', () => {
       tokenType: 'mcp' as const,
       version: 1,
       userId: 'member',
+      clientId: 'fixture-client',
+      grantId: 'fixture-grant',
       resource: getRoomoteMcpResourceUrl(Env.R_PUBLIC_URL ?? Env.R_APP_URL),
       scopes: [ROOMOTE_MCP_SCOPE],
     };
@@ -158,4 +173,24 @@ describe('member model discovery', () => {
     options.mockResolvedValue({ models: [], defaultModelId: 'openai/a' });
     expect((await app(mcp).request('/models')).status).toBe(200);
   });
+
+  it.each(['revoked', 'redis unavailable'])(
+    'refuses OAuth catalog reads when %s',
+    async (reason) => {
+      if (reason === 'revoked') grantLive.mockResolvedValue(false);
+      else grantLive.mockRejectedValue(new Error('Redis unavailable'));
+      const response = await app({
+        userId: 'member',
+        tokenType: 'mcp',
+        version: 1,
+        clientId: 'fixture-client',
+        grantId: 'fixture-grant',
+        resource: getRoomoteMcpResourceUrl(Env.R_PUBLIC_URL ?? Env.R_APP_URL),
+        scopes: [ROOMOTE_MCP_SCOPE],
+      }).request('/models');
+      expect(response.status).toBe(401);
+      expect(grantLive).toHaveBeenCalledOnce();
+      expect(options).not.toHaveBeenCalled();
+    },
+  );
 });

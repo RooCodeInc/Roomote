@@ -1,4 +1,8 @@
-import { TaskPayloadKind, RunStatus } from '@roomote/types';
+import {
+  TaskPayloadKind,
+  RunStatus,
+  AGENT_SAFETY_STOP_TEXT,
+} from '@roomote/types';
 import type { Task, TaskRun } from '@roomote/db/server';
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
@@ -234,6 +238,24 @@ function notify(envelope: ReturnType<typeof makeEnvelope>): Promise<void> {
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 describe('maybeNotifySourceThreadOfTerminalProviderError', () => {
+  it('does not wake a parent model to explain an already-persisted safety stop', async () => {
+    mockFindFirstRun.mockResolvedValue(
+      makeRun({
+        payload: payload({
+          fastAgentParent: {
+            sessionId: '11111111-1111-4111-8111-111111111111',
+            conversation: {
+              surface: 'web',
+              workspaceId: 'web',
+              conversationId: 'parent',
+            },
+          },
+        }),
+      }),
+    );
+    await notify(makeEnvelope({ errorSummary: AGENT_SAFETY_STOP_TEXT }));
+    expect(mockEnqueueParentEvent).not.toHaveBeenCalled();
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     mockRedisSet.mockResolvedValue('OK');

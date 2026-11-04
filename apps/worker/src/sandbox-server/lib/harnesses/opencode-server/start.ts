@@ -4,6 +4,7 @@ import net from 'node:net';
 import { execa, type ResultPromise } from 'execa';
 
 import type { ReasoningEffort, TaskModelRole } from '@roomote/types';
+import { sdk } from '@roomote/sdk/client';
 
 import type { HarnessLogger } from '../../../../logging';
 
@@ -365,6 +366,17 @@ export async function startOpenCodeServerHarness({
       fallbackRole,
       activeModelId,
       agentFallbacks,
+      onSafetyStop: async (reason, details) => {
+        const runId = Number(
+          runtimeEnv.ROOMOTE_TASK_RUN_ID ?? process.env.ROOMOTE_TASK_RUN_ID,
+        );
+        if (!Number.isSafeInteger(runId) || runId <= 0)
+          throw new Error('Missing run id for safety stop');
+        await sdk.taskRuns.stopForAgentSafety(
+          { runId, reason, details },
+          { signal: AbortSignal.timeout(5_000) },
+        );
+      },
       stopHookReminderStallTimeoutMs: parseTimeoutMs(
         process.env.ROOMOTE_STOP_HOOK_REMINDER_STALL_TIMEOUT_MS,
       ),

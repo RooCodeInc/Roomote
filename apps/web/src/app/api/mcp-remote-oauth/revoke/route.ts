@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 
-import { revokeRemoteMcpRefreshSession } from '@/lib/server/mcp-remote-oauth';
+import { getMcpOAuthRefresh, revokeMcpOAuthRefresh } from '@roomote/redis';
+import { bootstrapWebRuntimeEnv } from '@/lib/server/bootstrap-runtime-env';
 
 export const runtime = 'nodejs';
 
@@ -22,7 +23,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'invalid_request' }, { status: 400 });
   }
 
-  await revokeRemoteMcpRefreshSession(parsed.data.token, parsed.data.client_id);
+  await bootstrapWebRuntimeEnv();
+  // Adopt a legacy refresh family before revoking it through the same lifecycle.
+  await getMcpOAuthRefresh(parsed.data.token);
+  await revokeMcpOAuthRefresh(parsed.data.token, parsed.data.client_id);
   return new NextResponse(null, {
     status: 200,
     headers: { 'Cache-Control': 'no-store' },

@@ -22,6 +22,7 @@ const {
   mockGetGitHubCopilotAccessToken,
   mockGetFreshXaiAccessToken,
   mockRecordLlmUsage,
+  mockAdmitTaskInferenceRequest,
 } = vi.hoisted(() => ({
   mockFindTaskRun: vi.fn(),
   mockResolveModelProviderEnvValue: vi.fn(),
@@ -29,6 +30,7 @@ const {
   mockGetGitHubCopilotAccessToken: vi.fn(),
   mockGetFreshXaiAccessToken: vi.fn(),
   mockRecordLlmUsage: vi.fn(),
+  mockAdmitTaskInferenceRequest: vi.fn().mockResolvedValue(true),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -45,6 +47,7 @@ vi.mock('@roomote/db/server', () => ({
     },
   },
   taskRuns: { id: 'id' },
+  admitTaskInferenceRequest: mockAdmitTaskInferenceRequest,
   isDeploymentExperimentEnabled: vi.fn().mockResolvedValue(true),
   eq: vi.fn((column: unknown, value: unknown) => ({ column, value })),
   resolveModelProviderEnvValue: mockResolveModelProviderEnvValue,
@@ -141,7 +144,8 @@ describe('inference gateway', () => {
     // The Roomote trial key resolution is cached with a TTL; drop it so each
     // test observes its own mockResolveModelProviderEnvValue behavior.
     resetRoomoteInferenceKeyCache();
-    mockFindTaskRun.mockResolvedValue({ id: 42 });
+    mockFindTaskRun.mockResolvedValue({ id: 42, taskId: 'task-42' });
+    mockAdmitTaskInferenceRequest.mockResolvedValue(true);
     mockGetGitHubCopilotAccessToken.mockResolvedValue(null);
     mockGetFreshXaiAccessToken.mockResolvedValue(null);
     mockResolveModelProviderEnvValue.mockImplementation(
@@ -167,6 +171,27 @@ describe('inference gateway', () => {
     const response = await postMessages(createApp(createUserToken()));
 
     expect(response.status).toBe(403);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('refuses dispatch after durable admission is exhausted, independent of provider usage', async () => {
+    const fetchMock = stubUpstreamFetch();
+    mockAdmitTaskInferenceRequest.mockResolvedValue(false);
+    const response = await postMessages(createApp(createRunToken()));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: { code: 'roomote_agent_safety_stop' },
+    });
+    expect(mockAdmitTaskInferenceRequest).toHaveBeenCalledWith('task-42', 42);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('fails closed if durable admission is unavailable', async () => {
+    const fetchMock = stubUpstreamFetch();
+    mockAdmitTaskInferenceRequest.mockRejectedValueOnce(
+      new Error('database unavailable'),
+    );
+    expect((await postMessages(createApp(createRunToken()))).status).toBe(502);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -1593,7 +1618,10 @@ describe('Jevgrep gateway', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
     });
-  beforeEach(() => mockFindTaskRun.mockResolvedValue({ id: 42 }));
+  beforeEach(() => {
+    mockFindTaskRun.mockResolvedValue({ id: 42, taskId: 'task-42' });
+    mockAdmitTaskInferenceRequest.mockResolvedValue(true);
+  });
 
   it('requires run authentication before accepting source', async () => {
     expect((await post(createUserToken())).status).toBe(403);

@@ -1,12 +1,16 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import {
+  asRecord,
+  CHATGPT_GATEWAY_PROVIDER_ID,
+  buildInferenceGatewayOpenCodeBaseUrl,
+  getInferenceGatewayProvider,
   collectOpenRouterVariantModelAlias,
   CHATGPT_FAST_MODE_ENV_VAR_NAME,
   DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
@@ -678,6 +682,16 @@ export function buildOpenCodeCliEnv(
     options,
   );
 
+  if (
+    extraEnv?.ROOMOTE_TASK_INFERENCE_GATEWAY &&
+    extraEnv.ROOMOTE_TASK_INFERENCE_TOKEN
+  ) {
+    env.OPENCODE_CONFIG_CONTENT = rebaseTaskHelperInference(
+      env.OPENCODE_CONFIG_CONTENT,
+      extraEnv,
+    );
+  }
+
   // Do not inherit or accept disabled-provider credentials in helper model
   // processes, including callers that bypass the task dequeue path.
   for (const envVarName of DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES) {
@@ -694,7 +708,64 @@ export function buildOpenCodeCliEnv(
   // launching service's own configuration.
   scrubOpenCodeHelperEnv(env, extraEnv);
 
+  // An OAuth loader can replace the SDK fetch and ignore baseURL entirely.
+  // Keep direct auth for ordinary sessions, never gateway-bound task helpers.
+  if (isTaskHelperGatewayEnv(extraEnv)) delete env.OPENCODE_AUTH_CONTENT;
+
   return env;
+}
+
+function isTaskHelperGatewayEnv(
+  env?: Partial<Record<string, string | undefined>>,
+): boolean {
+  return Boolean(
+    env?.ROOMOTE_TASK_INFERENCE_GATEWAY && env.ROOMOTE_TASK_INFERENCE_TOKEN,
+  );
+}
+
+/** Task-associated control-plane helpers use the same admission boundary as
+ * sandbox children. Dedicated leases prevent cross-task credential/config reuse. */
+export function rebaseTaskHelperInference(
+  content: string,
+  env: Partial<Record<string, string | undefined>>,
+): string {
+  const config = JSON.parse(content) as Record<string, unknown>;
+  const providers = asRecord(config.provider) ?? {};
+  const ids = new Set<string>();
+  for (const model of [config.model, config.small_model]) {
+    if (typeof model === 'string') ids.add(model.split('/')[0]!);
+  }
+  // Only the selected helper model is needed; exclude ambient role models.
+  const selected = env.R_MODEL?.split('/')[0];
+  if (selected) ids.add(selected);
+  for (const id of ids) {
+    const routeId =
+      id === 'openai' && env.R_INFERENCE_GATEWAY_CHATGPT === '1'
+        ? CHATGPT_GATEWAY_PROVIDER_ID
+        : id;
+    const provider = getInferenceGatewayProvider(routeId);
+    if (!provider)
+      throw new Error(
+        `Task helper provider ${id} has no admission-controlled gateway`,
+      );
+    const existing = asRecord(providers[id]) ?? {};
+    providers[id] = {
+      ...existing,
+      options: {
+        ...asRecord(existing.options),
+        baseURL: buildInferenceGatewayOpenCodeBaseUrl(
+          env.ROOMOTE_TASK_INFERENCE_GATEWAY!,
+          provider,
+        ),
+        apiKey: env.ROOMOTE_TASK_INFERENCE_TOKEN,
+      },
+    };
+  }
+  return JSON.stringify({
+    ...config,
+    provider: Object.fromEntries([...ids].map((id) => [id, providers[id]])),
+    enabled_providers: [...ids],
+  });
 }
 
 function shellEscape(value: string): string {
@@ -961,6 +1032,20 @@ async function startManagedOpenCodeSdkServer(
     `--port=${port}`,
   ]);
   const env = buildOpenCodeCliEnv(extraEnv, options);
+  // Do not delete the service's shared auth.json: unrelated sessions still use
+  // it. Give this managed lease an empty auth store, overriding caller paths.
+  const taskDataHome = isTaskHelperGatewayEnv(extraEnv)
+    ? mkdtempSync(join(tmpdir(), 'roomote-task-helper-data-'))
+    : undefined;
+  if (taskDataHome) env.XDG_DATA_HOME = taskDataHome;
+  const cleanupTaskData = () => {
+    if (!taskDataHome) return;
+    try {
+      rmSync(taskDataHome, { recursive: true, force: true });
+    } catch {
+      console.warn('[OpenCode] Could not clean up isolated task-helper data.');
+    }
+  };
   // OpenCode blocks its first request on an `@opencode-ai/plugin` registry
   // install into each config directory it loads; a fresh container after a
   // deploy paid that in full (minutes, or a 300s timeout). Copy the
@@ -974,13 +1059,20 @@ async function startManagedOpenCodeSdkServer(
       }`,
     );
   }
-  const proc = spawn(command.command, command.args, {
-    env,
-    stdio: ['ignore', 'pipe', 'pipe'],
-    // Own process group, so shutdown can signal the entire tree (shell
-    // wrappers included) via the negative pid.
-    detached: true,
-  });
+  let proc: ChildProcess;
+  try {
+    proc = spawn(command.command, command.args, {
+      env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      // Own process group, so shutdown can signal the entire tree (shell
+      // wrappers included) via the negative pid.
+      detached: true,
+    });
+  } catch (error) {
+    cleanupTaskData();
+    throw error;
+  }
+  proc.once('close', cleanupTaskData);
 
   liveOpenCodeSdkServerProcs.add(proc);
   proc.once('exit', () => {
@@ -1023,6 +1115,7 @@ async function startManagedOpenCodeSdkServer(
       settled = true;
       clearTimeout(timeout);
       stopChildProcess(proc);
+      cleanupTaskData();
       reject(error);
     };
 

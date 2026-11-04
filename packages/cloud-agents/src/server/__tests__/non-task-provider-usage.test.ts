@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import { EventEmitter } from 'node:events';
 
 import { z } from 'zod';
+import { AGENT_SAFETY } from '@roomote/types';
 
 const {
   createOpencodeClientMock,
@@ -43,6 +44,10 @@ vi.mock('@opencode-ai/sdk/v2/client', () => ({
   createOpencodeClient: createOpencodeClientMock,
 }));
 
+vi.mock('@roomote/auth', () => ({
+  createRunToken: vi.fn().mockResolvedValue('test-run-token'),
+}));
+
 vi.mock('node:child_process', () => ({
   execFile: execFileMock,
   execFileSync: execFileSyncMock,
@@ -66,6 +71,8 @@ vi.mock('@roomote/db/server', () => ({
   eq: (column: unknown, value: unknown) => ({ type: 'eq', column, value }),
   recordLlmUsage: recordLlmUsageMock,
   resolveEffectiveModelRuntimeEnv: mockResolveEffectiveModelRuntimeEnv,
+  resolveSandboxModelRuntimeEnv: vi.fn().mockResolvedValue({}),
+  stopTaskForAgentSafety: vi.fn().mockResolvedValue(undefined),
   taskRuns: { id: 'taskRuns.id', taskId: 'taskRuns.taskId' },
 }));
 
@@ -141,7 +148,7 @@ describe('resolveOpenCodeSmallModel', () => {
     vi.clearAllMocks();
     process.env = originalEnv;
     mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({});
-    mockTaskRunFindFirst.mockResolvedValue(undefined);
+    mockTaskRunFindFirst.mockResolvedValue({ id: 42, actingUserId: null });
     recordLlmUsageMock.mockResolvedValue({ recorded: true });
     spawnedServers.length = 0;
     let nextServerPort = 4100;
@@ -206,6 +213,83 @@ describe('resolveOpenCodeSmallModel', () => {
     };
 
     expect(resolveOpenCodeSmallModel()).toBe('openrouter/openai/gpt-4.1-mini');
+  });
+
+  it('stops identical empty child searches, cancels the tree, persists the task stop, and does not retry', async () => {
+    const { stopTaskForAgentSafety } = await import('@roomote/db/server');
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+      OPENCODE_CONFIG_CONTENT: '',
+    });
+    sessionPromptMock.mockImplementation(() => new Promise(() => {}));
+    eventSubscribeMock.mockImplementation(async () => ({
+      stream: (async function* () {
+        yield {
+          type: 'session.created',
+          properties: {
+            sessionID: 'child',
+            info: { id: 'child', parentID: 'session-1' },
+          },
+        };
+        yield {
+          type: 'session.created',
+          properties: {
+            sessionID: 'grandchild',
+            info: { id: 'grandchild', parentID: 'child' },
+          },
+        };
+        for (let index = 0; index < 1_000; index++) {
+          yield {
+            type: 'message.part.updated',
+            properties: {
+              part: {
+                type: 'tool',
+                id: `part-${index}`,
+                callID: `call-${index}`,
+                sessionID: 'child',
+                messageID: 'message',
+                tool: 'grep',
+                state: {
+                  status: 'completed',
+                  input: { pattern: 'missing' },
+                  output: '',
+                },
+              },
+            },
+          };
+        }
+      })(),
+    }));
+    const { generateTrackedNonTaskText } =
+      await import('../non-task-provider-usage');
+    await expect(
+      generateTrackedNonTaskText({
+        surface: 'test',
+        taskId: 'task-1',
+        prompt: 'Do work',
+      }),
+    ).rejects.toThrow('Roomote stopped this task at a safety limit');
+    expect(stopTaskForAgentSafety).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        taskId: 'task-1',
+        reason: 'identical_tool_loop',
+        details: expect.objectContaining({
+          sessionId: 'child',
+          completedTools: 5,
+        }),
+      }),
+    );
+    expect(
+      new Set(sessionAbortMock.mock.calls.map(([input]) => input.sessionID)),
+    ).toEqual(new Set(['session-1', 'child', 'grandchild']));
+    expect(sessionPromptMock).toHaveBeenCalledTimes(1);
+    const config = JSON.parse(
+      spawnMock.mock.calls.at(-1)?.[2]?.env.OPENCODE_CONFIG_CONTENT,
+    );
+    expect(config.provider.openrouter.options.apiKey).toBe('test-run-token');
+    expect(config.provider.openrouter.options.baseURL).toContain(
+      '/api/inference/openrouter',
+    );
   });
 
   it('falls back to the deployment task model', () => {
@@ -1517,7 +1601,7 @@ describe('resolveOpenCodeSmallModel', () => {
     ]);
   });
 
-  it('lets OpenCode own a Fast prompt lifecycle when the deadline is disabled', async () => {
+  it('allows Fast prompts beyond the ordinary deadline within the finite platform maximum', async () => {
     vi.useFakeTimers();
     try {
       mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
@@ -1558,6 +1642,32 @@ describe('resolveOpenCodeSmallModel', () => {
 
       await expect(result).resolves.toBe('completed');
       expect(sessionAbortMock).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('cannot disable the finite pass deadline with timeoutMs null, even when prompt cancellation does not settle', async () => {
+    vi.useFakeTimers();
+    try {
+      mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+        R_MODEL: 'openrouter/openai/gpt-5.4',
+      });
+      sessionPromptMock.mockReturnValue(new Promise(() => {}));
+      const { generateTrackedNonTaskTextInOpenCodeSession } =
+        await import('../non-task-provider-usage');
+      const result = generateTrackedNonTaskTextInOpenCodeSession(
+        { surface: 'test', prompt: 'Keep working', timeoutMs: null },
+        {},
+        { directory: '/tmp/roomote-fast-native-test', tools: { task: true } },
+      );
+      const rejected = expect(result).rejects.toThrow(
+        'Roomote stopped this task at a safety limit',
+      );
+      await vi.advanceTimersByTimeAsync(AGENT_SAFETY.passTimeoutMs + 10_000);
+      await rejected;
+      expect(sessionAbortMock).toHaveBeenCalled();
+      expect(sessionPromptMock).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
     }
