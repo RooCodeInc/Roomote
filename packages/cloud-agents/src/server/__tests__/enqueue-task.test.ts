@@ -4,6 +4,7 @@
 // stamping, resume semantics, enqueue-time PR linkage, and pr_review queue
 // scope dedup.
 import Redis from 'ioredis-mock';
+import * as dbServer from '@roomote/db/server';
 
 const { mockGenerateLlmTaskTitle } = vi.hoisted(() => ({
   mockGenerateLlmTaskTitle: vi.fn().mockResolvedValue('Generated title'),
@@ -33,7 +34,6 @@ import {
   ACP_ENVELOPE_EVENT_TYPES,
   getFastAgentParentFromPayload,
   ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
-  computeProviders,
 } from '@roomote/types';
 import {
   db,
@@ -150,34 +150,17 @@ describe('resolveFreshTaskComputeProvider', () => {
 async function withoutEligibleDefault<T>(
   callback: () => Promise<T>,
 ): Promise<T> {
-  const prior = await db.query.deploymentSettings.findFirst({
-    where: eq(deploymentSettings.id, 'default'),
-  });
-  await db
-    .insert(deploymentSettings)
-    .values({
-      id: 'default',
-      runtimeComputeConfig: {
-        defaultProvider: null,
-        excludedProviders: [...computeProviders],
-      },
-    })
-    .onConflictDoUpdate({
-      target: deploymentSettings.id,
-      set: {
-        runtimeComputeConfig: {
-          defaultProvider: null,
-          excludedProviders: [...computeProviders],
-        },
-      },
-    });
+  // Keep unavailable-default scenarios local to this file; other integration
+  // tests enqueue real tasks against the same deployment settings in parallel.
+  const resolver = vi
+    .spyOn(dbServer, 'resolveDefaultComputeProvider')
+    .mockRejectedValue(
+      new Error('No configured sandbox provider is available.'),
+    );
   try {
     return await callback();
   } finally {
-    await db
-      .update(deploymentSettings)
-      .set({ runtimeComputeConfig: prior?.runtimeComputeConfig ?? null })
-      .where(eq(deploymentSettings.id, 'default'));
+    resolver.mockRestore();
   }
 }
 
