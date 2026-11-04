@@ -143,8 +143,10 @@ describe.skipIf(process.env.ROOMOTE_TEST_OPENCODE_SUBSCRIPTIONS !== '1')(
           expect(requests[0]).toMatchObject({
             authorization: 'Bearer synthetic-run-token',
           });
-          expect(requests[0]?.url).toContain(
-            `/api/inference/${provider === 'openai' ? 'openai-chatgpt' : provider}/`,
+          expect(requests[0]?.url).toBe(
+            provider === 'openai'
+              ? '/api/inference/openai-chatgpt/v1/responses'
+              : '/api/inference/github-copilot/responses',
           );
           expect(
             isAgentSafetyStop(result.error ?? result.data?.info.error),
