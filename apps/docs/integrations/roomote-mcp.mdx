@@ -362,8 +362,25 @@ use the task and context tools described above, but it does not provide general
 Roomote API access or administrator privileges. Existing Roomote permissions
 and connected-service access checks still apply to every request.
 
-You can revoke the connection from your MCP client. If a saved session expires
-or is revoked, Roomote asks you to approve access again in the browser.
+### Manage connected clients
+
+Open **Settings → Personal → Connected MCP clients** to see and revoke your
+authorizations. Admins can open **Settings → Users**, choose an **MCP
+authorization owner**, and revoke one client or **Revoke all** for that user.
+These controls affect inbound access to Roomote, separately from outbound
+integrations. Each user’s authorization is independent, even when multiple users
+connect through the same registered client.
+
+The list includes clients awaiting their first token exchange. It shows expiry,
+last authenticated request, and last token exchange separately. Historical
+timestamps that were not recorded before an upgrade appear as **Not recorded**.
+Client names are supplied by the client, not verified publisher identities.
+
+Revocation stops subsequent authenticated requests, including already-issued
+access tokens; work already accepted can finish. Reconnecting requires browser
+consent and creates a fresh authorization. Old tokens remain invalid after
+reconnecting. You can also revoke from your MCP client using the OAuth revocation
+endpoint. Revocation preserves the reusable client registration.
 
 Access tokens last one hour. Clients that request refresh tokens can refresh
 access within a 30-day session; rotating a refresh token does not extend that
@@ -371,6 +388,38 @@ session. The client registration is separate: each successful authorization
 code exchange or token refresh keeps the same client ID available for another
 90 days. Token expiration or revocation does not itself delete that registration
 or let a revoked token regain access.
+
+### Upgrading an existing deployment
+
+Existing connections with a live refresh session can be preserved. Roomote
+automatically backfills those sessions when they refresh or when their owner’s
+client list is opened. This preserves the original remaining expiry; it does not
+grant another 30 days. No database migration or Redis commands are required.
+
+Previously issued access tokens do not identify their client authorization, so
+they cannot be safely backfilled or selectively revoked. After the enforcing API
+upgrade, those tokens receive **401 Unauthorized**. A refresh-capable client can
+use its existing refresh token to obtain a tracked access token and continue. If
+the client does not refresh after a 401, reconnect it once. Clients without a
+refresh token, expired sessions, and in-progress authorization codes from the old
+version must repeat browser consent. A missing or expired client registration
+requires removing and re-adding the connection.
+
+For a staged self-hosted rollout, deploy the updated **web authorization server
+first**, drain all old web instances, then deploy the updated **API**. The previous
+API accepts the additional token claims but does not enforce live revocation;
+prompt revocation is guaranteed only after every API instance is updated. Do not
+continue running an old authorization server after enabling enforcement: it can
+only issue untracked access tokens. A coordinated deployment is also supported,
+but clients may need to refresh once when the API changes.
+
+OAuth access requires available Redis on every authenticated request. During an
+outage access is refused rather than trusting a potentially revoked token; retry
+after Redis recovers. Losing Redis authorization data requires reconnecting.
+Backfill cannot recover expired or lost sessions. Reverting the API removes
+prompt-revocation enforcement; reverting the authorization server can require
+reconnecting already-migrated clients because their legacy refresh state was
+replaced. Keep web and API versions coordinated during rollback too.
 
 To limit unused registrations, initial registration must be followed by a
 successful authorization code exchange within one hour. After 90 days without

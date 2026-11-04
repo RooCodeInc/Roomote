@@ -98,6 +98,8 @@ export const mcpAccessTokenPayloadSchema = z.object({
       error: () => ({ message: 'Token type must be "mcp"' }),
     }),
     s: z.array(z.string().min(1)).min(1, 'At least one scope is required'),
+    c: z.string().min(1),
+    g: z.string().min(1),
   }),
 });
 
@@ -105,6 +107,8 @@ export type McpAccessTokenPayload = z.infer<typeof mcpAccessTokenPayloadSchema>;
 
 export interface McpAccessTokenContext {
   userId: string;
+  clientId?: string;
+  grantId?: string;
   tokenType: 'mcp';
   version: number;
   resource: string;

@@ -181,6 +181,9 @@ jobs:
         run: pnpm --filter @roomote/db db:push:test --force
         env:
           DATABASE_URL: postgres://postgres:password@localhost:5432/test
+      - name: Install isolated OAuth lifecycle test dependency
+        # Disposable Unix-socket servers keep Lua lifecycle tests isolated.
+        run: command -v redis-server || (sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y redis-server)
       - name: Run unit tests
         run: pnpm test:ci
         env:

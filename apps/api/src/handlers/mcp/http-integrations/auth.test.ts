@@ -1,6 +1,7 @@
 import { generateKeyPairSync, randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
+import { oauthGrantFixture } from '../__tests__/oauth-fixture';
 import {
   configureAuthClientEnv,
   createAuthToken,
@@ -503,6 +504,7 @@ it.each(['unknown', 'deleted'] as const)(
 it('rejects a real public MCP token for an active member at the route policy', async () => {
   const actor = await member();
   const token = await createMcpAccessToken({
+    ...(await oauthGrantFixture(actor.id, 'http://localhost:3000/mcp')),
     userId: actor.id,
     resource: 'http://localhost:3000/mcp',
     scopes: ['mcp:roomote'],

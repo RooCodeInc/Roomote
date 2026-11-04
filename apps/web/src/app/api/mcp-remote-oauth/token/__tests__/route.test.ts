@@ -34,14 +34,26 @@ vi.mock('@roomote/auth', async (importOriginal) => ({
 
 vi.mock('@/lib/server/mcp-remote-oauth', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/server/mcp-remote-oauth')>()),
-  getRemoteMcpAuthorizationCode: mockGetCode,
-  consumeRemoteMcpAuthorizationCode: mockConsumeCode,
   promoteRemoteMcpOAuthClient: mockPromoteClient,
-  createRemoteMcpRefreshSession: mockCreateRefreshSession,
-  getRemoteMcpRefreshSession: mockGetRefreshSession,
-  revokeRemoteMcpRefreshSessionOnReplay: mockRevokeOnReplay,
-  rotateRemoteMcpRefreshToken: mockRotateRefreshToken,
   getRemoteMcpOAuthClient: mockGetClient,
+}));
+
+vi.mock('@roomote/redis', () => ({
+  getMcpOAuthCode: mockGetCode,
+  exchangeMcpOAuthCode: async (
+    code: string,
+    grant: unknown,
+    refresh: boolean,
+  ) => {
+    const result = await mockConsumeCode(code, grant);
+    if (!result) return null;
+    return {
+      refreshToken: refresh ? await mockCreateRefreshSession(grant) : undefined,
+    };
+  },
+  getMcpOAuthRefresh: mockGetRefreshSession,
+  revokeMcpOAuthRefresh: mockRevokeOnReplay,
+  rotateMcpOAuthRefresh: mockRotateRefreshToken,
 }));
 
 vi.mock('@/lib/server/bootstrap-runtime-env', () => ({
@@ -105,6 +117,7 @@ describe('POST /api/mcp-remote-oauth/token', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGetCode.mockResolvedValue({
+      grantId: 'grant',
       userId: 'user-1',
       clientId: '2a871f7c-9fac-4b4a-a7d3-cd3f4a329568',
       redirectUri: 'https://client.example/callback',
@@ -116,6 +129,7 @@ describe('POST /api/mcp-remote-oauth/token', () => {
     mockPromoteClient.mockResolvedValue(true);
     mockCreateRefreshSession.mockResolvedValue('initial-refresh-token');
     mockGetRefreshSession.mockResolvedValue({
+      grantId: 'grant',
       sessionId: 'session',
       userId: 'user-1',
       clientId: '2a871f7c-9fac-4b4a-a7d3-cd3f4a329568',
@@ -152,6 +166,8 @@ describe('POST /api/mcp-remote-oauth/token', () => {
     });
     expect(mockCreateToken).toHaveBeenCalledWith({
       userId: 'user-1',
+      clientId: '2a871f7c-9fac-4b4a-a7d3-cd3f4a329568',
+      grantId: 'grant',
       resource,
       scopes: ['mcp:roomote'],
       timeoutMs: 3_600_000,
@@ -165,12 +181,14 @@ describe('POST /api/mcp-remote-oauth/token', () => {
       '2a871f7c-9fac-4b4a-a7d3-cd3f4a329568',
       'user-1',
     );
-    expect(mockCreateRefreshSession).toHaveBeenCalledWith({
-      userId: 'user-1',
-      clientId: '2a871f7c-9fac-4b4a-a7d3-cd3f4a329568',
-      resource,
-      scopes: ['mcp:roomote'],
-    });
+    expect(mockCreateRefreshSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'user-1',
+        clientId: '2a871f7c-9fac-4b4a-a7d3-cd3f4a329568',
+        resource,
+        scopes: ['mcp:roomote'],
+      }),
+    );
   });
 
   it('uses the authorization resource when the token request omits it', async () => {
@@ -330,7 +348,10 @@ describe('POST /api/mcp-remote-oauth/token', () => {
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({ error: 'invalid_grant' });
-    expect(mockRevokeOnReplay).toHaveBeenCalledWith('session.refresh-token');
+    expect(mockRevokeOnReplay).toHaveBeenCalledWith(
+      'session.refresh-token',
+      '2a871f7c-9fac-4b4a-a7d3-cd3f4a329568',
+    );
     expect(mockRotateRefreshToken).not.toHaveBeenCalled();
     expect(mockCreateToken).not.toHaveBeenCalled();
     expect(mockPromoteClient).not.toHaveBeenCalled();
@@ -343,7 +364,10 @@ describe('POST /api/mcp-remote-oauth/token', () => {
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({ error: 'invalid_grant' });
-    expect(mockRevokeOnReplay).toHaveBeenCalledWith('session.refresh-token');
+    expect(mockRevokeOnReplay).toHaveBeenCalledWith(
+      'session.refresh-token',
+      '2a871f7c-9fac-4b4a-a7d3-cd3f4a329568',
+    );
     expect(mockRotateRefreshToken).not.toHaveBeenCalled();
     expect(mockPromoteClient).not.toHaveBeenCalled();
   });

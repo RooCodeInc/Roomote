@@ -29,6 +29,9 @@ vi.mock('@/components/settings/LinkedAccounts', () => ({
 vi.mock('@/components/settings/PersonalIntegrations', () => ({
   PersonalIntegrations: () => <section>Personal integrations</section>,
 }));
+vi.mock('@/components/settings/ConnectedMcpClients', () => ({
+  ConnectedMcpClients: () => <section>Connected MCP clients</section>,
+}));
 vi.mock('@/components/settings/BrowserNotificationsSection', () => ({
   BrowserNotificationsSection: () => <section>Browser notifications</section>,
 }));

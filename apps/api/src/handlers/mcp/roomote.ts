@@ -106,7 +106,7 @@ async function resolveRoomoteMcpAuth(
   options: { allowLegacyAudience: boolean },
 ): Promise<McpAuthContext> {
   if (!options.allowLegacyAudience) {
-    const member = resolveRoomoteMemberAuth(authContext);
+    const member = await resolveRoomoteMemberAuth(authContext);
     return { userId: member.userId, tokenType: 'auth' };
   }
   if (!authContext) {
@@ -149,6 +149,10 @@ async function resolveRoomoteMcpAuth(
     ].includes(authContext.resource) &&
     authContext.scopes.includes(ROOMOTE_MCP_SCOPE)
   ) {
+    await resolveRoomoteMemberAuth({
+      ...authContext,
+      resource: getRoomoteMcpResourceUrl(Env.R_PUBLIC_URL ?? Env.R_APP_URL),
+    });
     return {
       userId: authContext.userId,
       tokenType: 'auth',

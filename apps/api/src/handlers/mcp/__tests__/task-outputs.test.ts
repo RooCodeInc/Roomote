@@ -1,6 +1,8 @@
 import type { Context, Next } from 'hono';
 import { getRoomoteMcpResourceUrl } from '@roomote/auth';
 import { Env } from '@roomote/env';
+import { revokeMcpOAuthGrants } from '@roomote/redis';
+import { oauthGrantFixture } from './oauth-fixture';
 import {
   automations,
   customAutomations,
@@ -47,6 +49,10 @@ import { createApiApp } from '../../../server';
 const createdTasks: string[] = [];
 const createdUsers: string[] = [];
 const createdAutomations: string[] = [];
+const oauthIdentities = new Map<
+  string,
+  Awaited<ReturnType<typeof oauthGrantFixture>>
+>();
 let owner: Awaited<ReturnType<typeof userFactory.create>>;
 let other: typeof owner;
 let admin: typeof owner;
@@ -68,6 +74,7 @@ function credential(userId: string, kind: 'oauth' | 'user' = 'oauth') {
     kind === 'oauth'
       ? {
           userId,
+          ...oauthIdentities.get(userId),
           tokenType: 'mcp',
           resource: getRoomoteMcpResourceUrl(Env.R_PUBLIC_URL ?? Env.R_APP_URL),
           scopes: ['mcp:roomote'],
@@ -157,6 +164,7 @@ async function receipt(
 }
 
 beforeEach(async () => {
+  oauthIdentities.clear();
   state.credentials.clear();
   state.object.mockReset();
   state.object.mockImplementation(async () => ({
@@ -174,6 +182,17 @@ beforeEach(async () => {
   other = await userFactory.create({ role: 'member' });
   admin = await userFactory.create({ role: 'admin' });
   createdUsers.push(owner.id, other.id, admin.id);
+  await Promise.all(
+    [owner, other, admin].map(async (user) => {
+      oauthIdentities.set(
+        user.id,
+        await oauthGrantFixture(
+          user.id,
+          getRoomoteMcpResourceUrl(Env.R_PUBLIC_URL ?? Env.R_APP_URL),
+        ),
+      );
+    }),
+  );
   task = await createTask();
   run = await runFactory.create({
     taskId: task.id,
@@ -182,6 +201,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  await Promise.all(createdUsers.map((userId) => revokeMcpOAuthGrants(userId)));
   if (createdTasks.length)
     await db.delete(tasks).where(inArray(tasks.id, createdTasks));
   if (createdAutomations.length)
@@ -193,6 +213,29 @@ afterEach(async () => {
   createdTasks.length = 0;
   createdUsers.length = 0;
   createdAutomations.length = 0;
+});
+
+it('rejects previously issued download access immediately after its Redis grant is revoked', async () => {
+  const file = await artifact();
+  const authorization = credential(owner.id);
+  const issued = await call(
+    { action: 'get_artifact_download_url', taskId: task.id, path: file.path },
+    authorization,
+  );
+  const url = new URL(issued.data.url);
+  const path = `${url.pathname}${url.search}`;
+  expect(
+    (await createApiApp().request(path, { headers: { authorization } })).status,
+  ).toBe(200);
+  await revokeMcpOAuthGrants(owner.id);
+  // Keep the injected verified auth context: live Redis revocation, rather than
+  // removing a token from the test's authentication map, must reject the GET.
+  expect(state.credentials.has(authorization)).toBe(true);
+  state.object.mockClear();
+  expect(
+    (await createApiApp().request(path, { headers: { authorization } })).status,
+  ).toBe(401);
+  expect(state.object).not.toHaveBeenCalled();
 });
 
 it.each(['oauth', 'user'] as const)(

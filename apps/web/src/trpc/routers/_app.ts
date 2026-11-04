@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { DEPLOYMENT_EXPERIMENT_IDS } from '@roomote/feature-flags';
 import { instanceSkillsRouter } from './instance-skills';
+import { mcpAuthorizationsRouter } from './mcp-authorizations';
 import { vulnerabilityWatchRouter } from './vulnerability-watch';
 import {
   publicAuthTokenTimeoutMsSchema,
@@ -3762,6 +3763,7 @@ export const appRouter = createRouter({
   }),
 
   instanceSkills: instanceSkillsRouter,
+  mcpAuthorizations: mcpAuthorizationsRouter,
   vulnerabilityWatch: vulnerabilityWatchRouter,
 
   customSkills: createRouter({

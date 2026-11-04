@@ -8,13 +8,16 @@ const {
   mockValidateAuthToken,
   mockFindDeployment,
   mockFindUser,
+  mockGrantLive,
 } = vi.hoisted(() => ({
   mockValidateRunToken: vi.fn(),
   mockValidateMcpAccessToken: vi.fn(),
   mockValidateAuthToken: vi.fn(),
   mockFindDeployment: vi.fn(),
   mockFindUser: vi.fn(),
+  mockGrantLive: vi.fn(),
 }));
+vi.mock('@roomote/redis', () => ({ isMcpOAuthGrantLive: mockGrantLive }));
 
 vi.mock('@roomote/auth', () => ({
   validateRunToken: mockValidateRunToken,
@@ -79,6 +82,7 @@ describe('tokenAuthMiddleware token extraction', () => {
     vi.clearAllMocks();
     mockFindDeployment.mockResolvedValue({ metadata: null });
     mockFindUser.mockResolvedValue({ id: 'user-1', deletedAt: null });
+    mockGrantLive.mockResolvedValue(true);
     mockValidateRunToken.mockImplementation(async (token: string) => {
       if (token !== 'valid-run-token') {
         throw new Error('invalid token');
@@ -164,6 +168,25 @@ describe('tokenAuthMiddleware token extraction', () => {
     expect(authContext).toEqual(mcpContext);
     expect(mockValidateAuthToken).not.toHaveBeenCalled();
   });
+
+  it.each(['revoked', 'redis unavailable'])(
+    'fails closed for OAuth when %s',
+    async (reason) => {
+      mockValidateMcpAccessToken.mockResolvedValue({
+        tokenType: 'mcp',
+        userId: 'user-1',
+        clientId: 'client',
+        grantId: 'grant',
+      });
+      if (reason === 'revoked') mockGrantLive.mockResolvedValue(false);
+      else mockGrantLive.mockRejectedValue(new Error('Redis unavailable'));
+      expect(
+        await requestAuthContext('/mcp/models', {
+          authorization: 'Bearer oauth',
+        }),
+      ).toBeNull();
+    },
+  );
 
   it('accepts the run token from x-api-key on the inference gateway', async () => {
     const authContext = await requestAuthContext(

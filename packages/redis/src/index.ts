@@ -3,6 +3,18 @@ import type { Redis } from 'ioredis';
 export type { Redis } from 'ioredis';
 export { getRedis } from './client';
 export {
+  createMcpOAuthCode,
+  getMcpOAuthCode,
+  exchangeMcpOAuthCode,
+  getMcpOAuthRefresh,
+  rotateMcpOAuthRefresh,
+  revokeMcpOAuthRefresh,
+  isMcpOAuthGrantLive,
+  listMcpOAuthGrants,
+  revokeMcpOAuthGrants,
+  type McpOAuthGrantSummary,
+} from './mcp-oauth-grants';
+export {
   disconnectSessionPresence,
   disconnectSessionBrowserAttentionLease,
   getSessionBrowserAttentionCapabilities,
