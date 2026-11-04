@@ -3164,7 +3164,221 @@ describe('SlackNotifier', () => {
   });
 
   describe('fetchChannelMessages', () => {
+    afterEach(() => vi.restoreAllMocks());
+    const root = {
+      bot_id: 'B123',
+      text: 'root',
+      ts: '200.000',
+      reply_count: 1,
+      latest_reply: '250.000',
+      type: 'message',
+    };
+
+    it('returns accumulated roots without sleeping when Retry-After exceeds the remaining budget', async () => {
+      vi.useFakeTimers();
+      try {
+        const started = Date.now();
+        const fetchMock = vi
+          .fn()
+          .mockResolvedValueOnce(Response.json({ ok: true, messages: [root] }))
+          .mockResolvedValueOnce(
+            new Response('', { status: 429, headers: { 'Retry-After': '60' } }),
+          );
+        getGlobalWithFetch().fetch = fetchMock;
+        const result = await notifier.fetchChannelMessagesWithinBudget({
+          channel: 'C123',
+          deadlineAt: started + 1000,
+        });
+        expect(result.messages.map(({ ts }) => ts)).toEqual(['200.000']);
+        expect(result.incomplete).toEqual({ unexpandedThreadCount: 1 });
+        expect(Date.now()).toBe(started);
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('checks the deadline between stale-root lookback pages', async () => {
+      const started = Date.now();
+      const now = vi.spyOn(Date, 'now').mockReturnValue(started);
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(
+          Response.json({ ok: true, messages: [{ ...root, reply_count: 0 }] }),
+        )
+        .mockImplementationOnce(async () => {
+          now.mockReturnValue(started + 1000);
+          return Response.json({
+            ok: true,
+            messages: [],
+            response_metadata: { next_cursor: 'more' },
+          });
+        });
+      getGlobalWithFetch().fetch = fetchMock;
+      const result = await notifier.fetchChannelMessagesWithinBudget({
+        channel: 'C123',
+        oldest: '100.000',
+        deadlineAt: started + 1000,
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(result.messages).toHaveLength(1);
+      expect(result.incomplete).toEqual({ staleRootDiscoveryIncomplete: true });
+    });
+
+    it('does not join an unbudgeted thread retry sleep and leaves its retry behavior unchanged', async () => {
+      vi.useFakeTimers();
+      vi.spyOn(Math, 'random').mockReturnValue(0);
+      try {
+        const rateLimited = () =>
+          new Response('', { status: 429, headers: { 'Retry-After': '60' } });
+        const fetchMock = vi
+          .fn()
+          .mockResolvedValueOnce(rateLimited())
+          .mockResolvedValueOnce(Response.json({ ok: true, messages: [root] }))
+          .mockResolvedValueOnce(rateLimited())
+          .mockResolvedValueOnce(Response.json({ ok: true, messages: [] }));
+        getGlobalWithFetch().fetch = fetchMock;
+        const unbudgeted = notifier.fetchThreadMessages({
+          channel: 'C123',
+          threadTs: root.ts,
+        });
+        await vi.advanceTimersByTimeAsync(0);
+        const partial = await notifier.fetchChannelMessagesWithinBudget({
+          channel: 'C123',
+          deadlineAt: Date.now() + 1000,
+        });
+        expect(partial.incomplete).toEqual({ unexpandedThreadCount: 1 });
+        expect(fetchMock).toHaveBeenCalledTimes(3);
+        await vi.advanceTimersByTimeAsync(60_000);
+        await expect(unbudgeted).resolves.toEqual([]);
+        expect(fetchMock).toHaveBeenCalledTimes(4);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it.each([{ messages: [] }, { messages: [{ ...root, reply_count: 0 }] }])(
+      'marks skipped lookback after a final primary page, including empty results ($messages)',
+      async ({ messages }) => {
+        const started = Date.now();
+        const now = vi.spyOn(Date, 'now').mockReturnValue(started);
+        getGlobalWithFetch().fetch = vi.fn().mockImplementation(async () => {
+          now.mockReturnValue(started + 1000);
+          return Response.json({ ok: true, messages });
+        });
+        const result = await notifier.fetchChannelMessagesWithinBudget({
+          channel: 'C123',
+          oldest: '100.000',
+          deadlineAt: started + 1000,
+        });
+        expect(result.messages).toHaveLength(messages.length);
+        expect(result.incomplete).toEqual({
+          staleRootDiscoveryIncomplete: true,
+        });
+        expect(getGlobalWithFetch().fetch).toHaveBeenCalledTimes(1);
+      },
+    );
+
+    it('aborts an in-flight history request at the deadline and retains previous pages', async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(
+          Response.json({
+            ok: true,
+            messages: [{ ...root, reply_count: 0 }],
+            response_metadata: { next_cursor: 'more' },
+          }),
+        )
+        .mockImplementationOnce(
+          (_url: string, init: RequestInit) =>
+            new Promise((_resolve, reject) => {
+              init.signal!.addEventListener(
+                'abort',
+                () => reject(init.signal!.reason),
+                { once: true },
+              );
+            }),
+        );
+      getGlobalWithFetch().fetch = fetchMock;
+      const result = await notifier.fetchChannelMessagesWithinBudget({
+        channel: 'C123',
+        deadlineAt: Date.now() + 50,
+      });
+      expect(result.messages).toHaveLength(1);
+      expect(result.incomplete).toMatchObject({
+        historyIncomplete: true,
+        historyStoppedAtTs: '200.000',
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('aborts an in-flight reply request at the deadline without losing channel messages', async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(Response.json({ ok: true, messages: [root] }))
+        .mockImplementationOnce(
+          (_url: string, init: RequestInit) =>
+            new Promise((_resolve, reject) => {
+              init.signal!.addEventListener(
+                'abort',
+                () => reject(init.signal!.reason),
+                { once: true },
+              );
+            }),
+        );
+      getGlobalWithFetch().fetch = fetchMock;
+      const result = await notifier.fetchChannelMessagesWithinBudget({
+        channel: 'C123',
+        deadlineAt: Date.now() + 50,
+      });
+      expect(result.messages).toHaveLength(1);
+      expect(result.incomplete).toEqual({ unexpandedThreadCount: 1 });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('keeps replies newer than the root-history continuation bound', async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(
+          Response.json({ ok: true, messages: [{ ...root, ts: '150.000' }] }),
+        )
+        .mockResolvedValueOnce(Response.json({ ok: true, messages: [] }))
+        .mockResolvedValueOnce(
+          Response.json({
+            ok: true,
+            messages: [
+              { ...root, ts: '250.000', thread_ts: '150.000', text: 'reply' },
+            ],
+          }),
+        );
+      getGlobalWithFetch().fetch = fetchMock;
+      const result = await notifier.fetchChannelMessagesWithinBudget({
+        channel: 'C123',
+        oldest: '100.000',
+        latest: '300.000',
+        historyLatest: '200.000',
+        deadlineAt: Date.now() + 1000,
+      });
+      expect(result.messages.map(({ ts }) => ts)).toEqual([
+        '150.000',
+        '250.000',
+      ]);
+      expect(
+        new URL(fetchMock.mock.calls[0]![0] as string).searchParams.get(
+          'latest',
+        ),
+      ).toBe('200.000');
+      expect(
+        new URL(fetchMock.mock.calls[2]![0] as string).searchParams.get(
+          'latest',
+        ),
+      ).toBe('300.000');
+    });
+
     it('stops at the deadline and reports what it did not read', async () => {
+      const started = Date.now();
+      const now = vi.spyOn(Date, 'now').mockReturnValue(started);
       vi.spyOn(
         SlackNotifier.prototype as unknown as {
           getUsersInfo(userIds: string[]): Promise<Map<string, string>>;
@@ -3173,22 +3387,25 @@ describe('SlackNotifier', () => {
       ).mockResolvedValue(new Map([['U123', 'Alice']]));
       const fetchMock = vi.fn().mockResolvedValueOnce({
         ok: true,
-        json: async () => ({
-          ok: true,
-          messages: [
-            {
-              user: 'U123',
-              text: 'root',
-              ts: '112.000',
-              thread_ts: '112.000',
-              reply_count: 2,
-              latest_reply: '112.500',
-              type: 'message',
-            },
-            { user: 'U123', text: 'newer', ts: '113.000', type: 'message' },
-          ],
-          response_metadata: { next_cursor: 'cursor-1' },
-        }),
+        json: async () => {
+          now.mockReturnValue(started + 1000);
+          return {
+            ok: true,
+            messages: [
+              {
+                user: 'U123',
+                text: 'root',
+                ts: '112.000',
+                thread_ts: '112.000',
+                reply_count: 2,
+                latest_reply: '112.500',
+                type: 'message',
+              },
+              { user: 'U123', text: 'newer', ts: '113.000', type: 'message' },
+            ],
+            response_metadata: { next_cursor: 'cursor-1' },
+          };
+        },
       });
       getGlobalWithFetch().fetch = fetchMock;
 
@@ -3196,7 +3413,7 @@ describe('SlackNotifier', () => {
         channel: 'C123',
         oldest: '100.000',
         latest: '113.000',
-        deadlineAt: Date.now() - 1,
+        deadlineAt: started + 1000,
       });
 
       expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -3207,6 +3424,7 @@ describe('SlackNotifier', () => {
       expect(result.incomplete).toEqual({
         historyStoppedAtTs: '112.000',
         unexpandedThreadCount: 1,
+        staleRootDiscoveryIncomplete: true,
       });
     });
 

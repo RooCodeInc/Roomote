@@ -362,6 +362,7 @@ async function buildCommunicationChannelMessagesPayload(options: {
   channel?: string;
   oldest?: string;
   latest?: string;
+  historyLatest?: string;
   provider?: 'slack' | 'discord';
 }) {
   let taskRun: CommunicationLookupTaskRun | undefined;
@@ -378,6 +379,7 @@ async function buildCommunicationChannelMessagesPayload(options: {
   }
 
   return lookupCommunicationChannelMessages({
+    ...(options.historyLatest ? { historyLatest: options.historyLatest } : {}),
     ...(typeof options.channel === 'string' && options.channel.length > 0
       ? { channel: options.channel }
       : {}),
@@ -473,6 +475,10 @@ async function createRoomoteMcpServer(
           .string()
           .optional()
           .describe(CHAT_CHANNEL_MESSAGES_TOOL.inputDescriptions.latest),
+        historyLatest: z
+          .string()
+          .optional()
+          .describe(CHAT_CHANNEL_MESSAGES_TOOL.inputDescriptions.historyLatest),
         provider: z
           .enum(['slack', 'discord'])
           .optional()
@@ -488,10 +494,11 @@ async function createRoomoteMcpServer(
         openWorldHint: false,
       },
     },
-    async ({ channel, oldest, latest, provider }) => {
+    async ({ channel, oldest, latest, historyLatest, provider }) => {
       const payload = await buildCommunicationChannelMessagesPayload({
         auth,
         actingUserId,
+        ...(historyLatest ? { historyLatest: historyLatest.trim() } : {}),
         ...(typeof channel === 'string' && channel.trim().length > 0
           ? { channel: channel.trim() }
           : {}),

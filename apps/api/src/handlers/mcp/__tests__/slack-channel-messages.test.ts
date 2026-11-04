@@ -257,6 +257,7 @@ describe('slack channel messages MCP endpoint', () => {
       channelId: 'CENG',
       requestedOldest: '2026-04-01T00:00:00Z',
       requestedLatest: '2026-04-02T00:00:00Z',
+      requestedHistoryLatest: '1775088000.000000',
       messageCount: 2,
       messages: [
         {
@@ -284,6 +285,7 @@ describe('slack channel messages MCP endpoint', () => {
       channel: 'CENG',
       oldest: '1775001600.000000',
       latest: '1775088000.000000',
+      historyLatest: '1775088000.000000',
     });
   });
 
@@ -319,15 +321,63 @@ describe('slack channel messages MCP endpoint', () => {
     expect(response.status).toBe(200);
     expect(body).toMatchObject({
       truncated: true,
-      nextLatest: '1711929900.000000',
+      historyContinuation: {
+        oldest: '1775001600.000000',
+        latest: '1775088000.000000',
+        historyLatest: '1711929900.000000',
+      },
       messageCount: 1,
     });
     expect(String((body as { note?: unknown }).note)).toContain(
-      'latest=1711929900.000000',
+      'historyContinuation',
     );
     expect(String((body as { note?: unknown }).note)).toContain(
       'Replies in 3 thread(s)',
     );
+  });
+
+  it('marks an empty primary result partial when stale-root discovery was skipped', async () => {
+    fetchChannelMessagesMock.mockResolvedValue([]);
+    fetchIncompleteMock.mockReturnValueOnce({
+      staleRootDiscoveryIncomplete: true,
+    });
+    const response = await postChannelMessages(runToken, {
+      channel: 'eng',
+      oldest: '100.000',
+      latest: '300.000',
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      truncated: true,
+      messageCount: 0,
+      messages: [],
+      note: expect.stringContaining(
+        'Stale-thread discovery was skipped or incomplete',
+      ),
+    });
+  });
+
+  it('accepts the returned history continuation without narrowing the reply window', async () => {
+    fetchChannelMessagesMock.mockResolvedValue([]);
+    fetchIncompleteMock.mockReturnValueOnce({ historyStoppedAtTs: '200.000' });
+    const response = await postChannelMessages(runToken, {
+      channel: 'eng',
+      oldest: '100.000',
+      latest: '300.000',
+    });
+    const first = (await response.json()) as {
+      historyContinuation: Record<string, string>;
+    };
+    await postChannelMessages(runToken, {
+      channel: 'eng',
+      ...first.historyContinuation,
+    });
+    expect(fetchChannelMessagesMock).toHaveBeenLastCalledWith({
+      channel: 'CENG',
+      oldest: '100.000',
+      latest: '300.000',
+      historyLatest: '200.000',
+    });
   });
 
   it('uses the originating Slack channel when channel is omitted', async () => {
@@ -352,6 +402,8 @@ describe('slack channel messages MCP endpoint', () => {
     expect(fetchChannelMessagesMock).toHaveBeenCalledWith({
       channel: 'C123',
       oldest: '1711929600.000000',
+      latest: expect.any(String),
+      historyLatest: expect.any(String),
     });
     expect(resolveChannelIdMock).toHaveBeenCalledWith('#c123');
     expect(isAppInChannelMock).toHaveBeenCalledWith('C123');
@@ -390,7 +442,11 @@ describe('slack channel messages MCP endpoint', () => {
     expect(response.status).toBe(200);
     expect(body.channelId).toBe('CENG');
     expect(isUserInChannelMock).not.toHaveBeenCalled();
-    expect(fetchChannelMessagesMock).toHaveBeenCalledWith({ channel: 'CENG' });
+    expect(fetchChannelMessagesMock).toHaveBeenCalledWith({
+      channel: 'CENG',
+      latest: expect.any(String),
+      historyLatest: expect.any(String),
+    });
   });
 
   it('allows public channel lookup when the acting user has no linked Slack account', async () => {
@@ -415,7 +471,11 @@ describe('slack channel messages MCP endpoint', () => {
     expect(body.channelId).toBe('CENG');
     expect(isPublicChannelMock).toHaveBeenCalledWith('CENG');
     expect(isUserInChannelMock).not.toHaveBeenCalled();
-    expect(fetchChannelMessagesMock).toHaveBeenCalledWith({ channel: 'CENG' });
+    expect(fetchChannelMessagesMock).toHaveBeenCalledWith({
+      channel: 'CENG',
+      latest: expect.any(String),
+      historyLatest: expect.any(String),
+    });
   });
 
   it('rejects public channel lookup when the Slack app is not a member', async () => {
@@ -462,7 +522,11 @@ describe('slack channel messages MCP endpoint', () => {
       channelId: 'CENG',
       userId: 'UACTOR',
     });
-    expect(fetchChannelMessagesMock).toHaveBeenCalledWith({ channel: 'CENG' });
+    expect(fetchChannelMessagesMock).toHaveBeenCalledWith({
+      channel: 'CENG',
+      latest: expect.any(String),
+      historyLatest: expect.any(String),
+    });
   });
 
   it('rejects private channel lookup when the acting Slack user is not a member', async () => {

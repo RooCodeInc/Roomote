@@ -240,6 +240,59 @@ describe('lookupCommunicationMessageContext', () => {
 describe('lookupCommunicationChannelMessages', () => {
   afterEach(() => vi.clearAllMocks());
 
+  it('carries Slack root continuations through the communication strategy and preserves their reply bound', async () => {
+    const historyContinuation = {
+      oldest: '100.000',
+      latest: '300.000',
+      historyLatest: '200.000',
+    };
+    lookupSlackChannelMessagesMock.mockResolvedValueOnce({
+      slackTeamId: 'T123',
+      channelId: 'C123',
+      requestedOldest: '100.000',
+      requestedLatest: '300.000',
+      requestedHistoryLatest: '300.000',
+      truncated: true,
+      historyContinuation,
+      messageCount: 0,
+      messages: [],
+    });
+    const first = await lookupCommunicationChannelMessages({
+      provider: 'slack',
+      channel: 'C123',
+      oldest: '100.000',
+      latest: '300.000',
+    });
+    expect(first.historyContinuation).toEqual(historyContinuation);
+    lookupSlackChannelMessagesMock.mockResolvedValueOnce({
+      slackTeamId: 'T123',
+      channelId: 'C123',
+      messageCount: 1,
+      messages: [
+        {
+          ts: '250.000',
+          threadTs: '150.000',
+          user: 'U1',
+          text: 'new reply on old root',
+          fileCount: 0,
+        },
+      ],
+    });
+    const next = await lookupCommunicationChannelMessages({
+      provider: 'slack',
+      channel: 'C123',
+      ...first.historyContinuation,
+    });
+    expect(lookupSlackChannelMessagesMock).toHaveBeenLastCalledWith({
+      channel: 'C123',
+      ...historyContinuation,
+    });
+    expect(next.messages[0]).toMatchObject({
+      id: '250.000',
+      threadId: '150.000',
+    });
+  });
+
   it('uses the task communication channel when channel is omitted', async () => {
     lookupDiscordChannelMessagesMock.mockResolvedValueOnce({
       channelId: '456',

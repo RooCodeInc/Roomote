@@ -72,6 +72,12 @@ type SlackChannelMessagesPayload = {
   requestedLatest?: string;
   truncated?: true;
   nextLatest?: string;
+  requestedHistoryLatest?: string;
+  historyContinuation?: {
+    oldest?: string;
+    latest?: string;
+    historyLatest?: string;
+  };
   note?: string;
   messageCount: number;
   messages: Array<{
@@ -630,11 +636,19 @@ export async function lookupSlackChannelMessages(options: {
   slackTeamDomain?: string;
   oldest?: string;
   latest?: string;
+  historyLatest?: string;
   taskRun?: SlackReplyTargetTaskRun | null;
   actingSlackMembershipUserId?: string | null;
 }): Promise<SlackChannelMessagesPayload> {
   const oldestBoundary = normalizeSlackTimeBoundary(options.oldest, 'oldest');
   const latestBoundary = normalizeSlackTimeBoundary(options.latest, 'latest');
+  const historyBoundary = normalizeSlackTimeBoundary(
+    options.historyLatest,
+    'latest',
+  );
+  // Freeze an open-ended window so continuation never changes its reply bound.
+  const replyLatest = latestBoundary?.slackTs ?? (Date.now() / 1000).toFixed(6);
+  const historyLatest = historyBoundary?.slackTs ?? replyLatest;
   const channel =
     options.channel ??
     (options.taskRun
@@ -661,13 +675,19 @@ export async function lookupSlackChannelMessages(options: {
 
   let messages: SlackThreadMessage[];
   let incomplete:
-    | { historyStoppedAtTs?: string; unexpandedThreadCount?: number }
+    | {
+        historyStoppedAtTs?: string;
+        unexpandedThreadCount?: number;
+        staleRootDiscoveryIncomplete?: boolean;
+        historyIncomplete?: boolean;
+      }
     | undefined;
   try {
     ({ messages, incomplete } = await slack.fetchChannelMessagesWithinBudget({
       channel: channelId,
       ...(oldestBoundary ? { oldest: oldestBoundary.slackTs } : {}),
-      ...(latestBoundary ? { latest: latestBoundary.slackTs } : {}),
+      latest: replyLatest,
+      historyLatest,
       deadlineAt: Date.now() + SLACK_CHANNEL_MESSAGES_TIME_BUDGET_MS,
     }));
   } catch (error) {
@@ -684,12 +704,19 @@ export async function lookupSlackChannelMessages(options: {
     slackTeamId,
     channelId,
     ...(oldestBoundary ? { requestedOldest: oldestBoundary.requested } : {}),
-    ...(latestBoundary ? { requestedLatest: latestBoundary.requested } : {}),
+    requestedLatest: latestBoundary?.requested ?? replyLatest,
+    requestedHistoryLatest: historyLatest,
     ...(incomplete
       ? {
           truncated: true as const,
-          ...(incomplete.historyStoppedAtTs
-            ? { nextLatest: incomplete.historyStoppedAtTs }
+          ...(incomplete.historyStoppedAtTs || incomplete.historyIncomplete
+            ? {
+                historyContinuation: {
+                  ...(oldestBoundary ? { oldest: oldestBoundary.slackTs } : {}),
+                  latest: replyLatest,
+                  historyLatest: incomplete.historyStoppedAtTs ?? historyLatest,
+                },
+              }
             : {}),
           note: describeIncompleteSlackChannelRead(incomplete),
         }
@@ -708,13 +735,20 @@ const SLACK_CHANNEL_MESSAGES_TIME_BUDGET_MS = 40_000;
 function describeIncompleteSlackChannelRead(incomplete: {
   historyStoppedAtTs?: string;
   unexpandedThreadCount?: number;
+  staleRootDiscoveryIncomplete?: boolean;
+  historyIncomplete?: boolean;
 }): string {
   const parts = [
     'Slack was too slow to read this whole window in one call, so this result is partial.',
   ];
-  if (incomplete.historyStoppedAtTs) {
+  if (incomplete.historyStoppedAtTs || incomplete.historyIncomplete) {
     parts.push(
-      `Older top-level messages were not read: call again with latest=${incomplete.historyStoppedAtTs} to continue further back.`,
+      'Older top-level messages were not read: call again with the fields in historyContinuation and the same channel. This advances only the root-history bound and preserves the original reply window. Deduplicate overlapping messages by ID.',
+    );
+  }
+  if (incomplete.staleRootDiscoveryIncomplete) {
+    parts.push(
+      'Stale-thread discovery was skipped or incomplete; replies on pre-window roots may be missing. Retry with a narrower window or fetch specific threads.',
     );
   }
   if (incomplete.unexpandedThreadCount) {
