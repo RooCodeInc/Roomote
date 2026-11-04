@@ -481,7 +481,7 @@ describe('hashIntegrationToolApprovalRules', () => {
 
 describe('resolveFastAgentToolApprovalRules', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
   });
 
   it('layers the Session overrides on the deployment policies', async () => {
@@ -894,7 +894,7 @@ describe('parallel calls in one script', () => {
     });
 
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     vi.mocked(listIntegrationToolSessionOverrides).mockResolvedValue([]);
     vi.mocked(insertIntegrationToolApproval).mockResolvedValue({
       approvalId: 'batch-approval',
@@ -1323,7 +1323,7 @@ describe('tool approval bridge', () => {
   });
 
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     databaseMocks.recentApprovalOutcomes = [];
     vi.mocked(isDeploymentExperimentEnabled).mockResolvedValue(true);
     vi.mocked(listIntegrationToolSessionOverrides).mockResolvedValue([]);
