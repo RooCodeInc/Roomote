@@ -2,6 +2,26 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.20.0 (2026-11-04)
+
+Roomote 1.20.0 adds MCP connection controls and testing, stops runaway agent activity, and includes security updates for redirects and static-file serving.
+
+### Highlights
+
+- Manage connected MCP clients and revoke access immediately. **Upgrade the web authorization server before the API; existing clients may need to refresh or reconnect.**
+- Test saved remote MCP connections from shared or personal integration settings.
+- Stop repeated tool-call loops and excessive inference requests while preserving partial work and a visible safety notice.
+- Includes security fixes for credential handling across redirects and static-file paths.
+
+### Minor changes
+
+- Test a saved remote MCP server's connection on demand from Manage tools in shared or personal integration settings. Each test retrieves a fresh tool catalog using the saved authentication, reports success or failure even for an empty catalog, and leaves tool approval choices and server enablement unchanged. Local stdio servers still need to be checked inside a task sandbox.
+- Manage and revoke inbound MCP client authorizations from personal settings or, for admins, by user in users settings, including revoking all clients for a user. Revocation blocks already-issued OAuth access tokens on subsequent requests. **Upgrade compatibility:** legacy MCP access tokens without client/grant identity receive 401 after API enforcement is deployed. Deploy the updated web authorization server and drain all old issuer instances **before** upgrading the API. Live legacy refresh sessions are backfilled without extending their original expiry; clients without a usable refresh session, or unable to refresh after a 401, must reconnect and repeat browser consent. In-progress legacy authorization codes also require consent again. Redis outages refuse OAuth access, and lost authorization data requires reconnecting. Rolling back the API removes prompt revocation enforcement; rolling back the authorization server may require reconnecting migrated clients.
+
+### Patch changes
+
+- Stop repeated identical tool-call loops and bound subagent passes. Enforce a durable task-wide inference request ceiling before dispatch, retain partial work, and save a visible safety notice without requiring another model response.
+
 ## 1.19.7 (2026-11-01)
 
 Roomote 1.19.7 strengthens runtime security while keeping your existing sign-in and task workflows familiar.
