@@ -493,6 +493,8 @@ export class MockTelegramServer {
     );
 
     if (existingIndex >= 0) {
+      // Redelivery or edited text does not clear reactions set by the bot.
+      stored.reactions = this.state.messages?.[existingIndex]?.reactions ?? [];
       this.state.messages?.splice(existingIndex, 1, stored);
       return;
     }
