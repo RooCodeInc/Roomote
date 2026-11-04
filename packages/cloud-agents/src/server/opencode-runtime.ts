@@ -751,6 +751,11 @@ export function rebaseTaskHelperInference(
     const existing = asRecord(providers[id]) ?? {};
     providers[id] = {
       ...existing,
+      // As in the sandbox provider config, activate Copilot before OpenCode's
+      // custom-loader pass so GPT-5+ models use /responses, not /chat/completions.
+      ...(id === 'github-copilot'
+        ? { env: ['ROOMOTE_TASK_INFERENCE_TOKEN'] }
+        : {}),
       options: {
         ...asRecord(existing.options),
         baseURL: buildInferenceGatewayOpenCodeBaseUrl(
