@@ -443,6 +443,79 @@ describe('OpenCode subagent run tracking', () => {
     }
   });
 
+  it.each(['cancel', 'dispose'])(
+    'cleans up spawn safety deadlines on %s',
+    async (action) => {
+      vi.useFakeTimers();
+      const { client, harness } = createHarness();
+      try {
+        await connectHarness(harness, client);
+        await armSpawn(client, harness);
+        if (action === 'dispose') harness.dispose();
+        else
+          harness.sendCommand({
+            commandName: TaskCommandName.CancelTask,
+            data: {},
+          });
+        await vi.advanceTimersByTimeAsync(0);
+        const aborts = client.abort.mock.calls.length;
+        await vi.advanceTimersByTimeAsync(AGENT_SAFETY.passTimeoutMs + 1_000);
+        expect(client.abort).toHaveBeenCalledTimes(aborts);
+      } finally {
+        harness.dispose();
+      }
+    },
+  );
+
+  it('starts a fresh safety pass when a new task call resumes a settled child', async () => {
+    const { client, harness } = createHarness();
+    try {
+      await connectHarness(harness, client);
+      await armSpawn(client, harness);
+      const completeTool = (id: number) =>
+        client.emit({
+          type: 'message.part.updated',
+          properties: {
+            part: {
+              ...createChildToolPart({
+                callId: `grep-${id}`,
+                tool: 'grep',
+                status: 'completed',
+              }),
+              state: { status: 'completed', input: {}, output: '' },
+            },
+          },
+        });
+      for (let id = 0; id < 4; id++) await completeTool(id);
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: createTaskToolPart({
+            status: 'completed',
+            metadata: { sessionId: 'ses_child_1' },
+          }),
+        },
+      });
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: createTaskToolPart({
+            callId: 'resumed-call',
+            metadata: { sessionId: 'ses_child_1' },
+          }),
+        },
+      });
+      for (let id = 0; id < 4; id++) await completeTool(id);
+      expect(client.abort).not.toHaveBeenCalled();
+      await completeTool(4);
+      expect(client.abort).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: 'ses_child_1' }),
+      );
+    } finally {
+      harness.dispose();
+    }
+  });
+
   it('does not extend an older pass deadline when a sibling starts or child progress arrives', async () => {
     vi.useFakeTimers();
     const { client, harness } = createHarness();
