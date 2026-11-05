@@ -91,7 +91,7 @@
         "pages": [
           {
             "group": "Models and inference",
-            "icon": "brain",
+            "icon": "layers",
             "root": "models",
             "expanded": false,
             "pages": [
