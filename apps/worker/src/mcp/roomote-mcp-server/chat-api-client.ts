@@ -231,6 +231,7 @@ export async function getChatChannelMessages(
     channel?: string;
     oldest?: string;
     latest?: string;
+    historyLatest?: string;
   },
 ): Promise<CommunicationChannelMessagesResponse> {
   return postToCommunicationLookupEndpoint<CommunicationChannelMessagesResponse>(

@@ -54,11 +54,16 @@ function parseChannelMessagesRequestBody(body: unknown): {
   channel?: string;
   oldest?: string;
   latest?: string;
+  historyLatest?: string;
 } {
   if (!body || typeof body !== 'object') {
     throw new Error('Request body must be a JSON object');
   }
   const record = body as Record<string, unknown>;
+  const historyLatest =
+    typeof record.historyLatest === 'string'
+      ? record.historyLatest.trim()
+      : undefined;
   const channel =
     typeof record.channel === 'string' ? record.channel.trim() : undefined;
   const oldest =
@@ -69,6 +74,7 @@ function parseChannelMessagesRequestBody(body: unknown): {
     ...(channel ? { channel } : {}),
     ...(oldest ? { oldest } : {}),
     ...(latest ? { latest } : {}),
+    ...(historyLatest ? { historyLatest } : {}),
   };
 }
 

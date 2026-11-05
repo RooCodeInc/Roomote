@@ -679,6 +679,7 @@ function parseChannelMessagesRequestBody(body: unknown): {
   channel?: string;
   oldest?: string;
   latest?: string;
+  historyLatest?: string;
 } {
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
     throw new Error('Invalid request body');
@@ -687,6 +688,10 @@ function parseChannelMessagesRequestBody(body: unknown): {
   const record = body as Record<string, unknown>;
   const rawChannel =
     typeof record.channel === 'string' ? record.channel.trim() : '';
+  const historyLatest =
+    typeof record.historyLatest === 'string'
+      ? record.historyLatest.trim()
+      : undefined;
   const oldest =
     typeof record.oldest === 'string' && record.oldest.trim().length > 0
       ? record.oldest.trim()
@@ -697,12 +702,20 @@ function parseChannelMessagesRequestBody(body: unknown): {
       : undefined;
 
   if (!rawChannel) {
-    return { ...(oldest ? { oldest } : {}), ...(latest ? { latest } : {}) };
+    return {
+      ...(oldest ? { oldest } : {}),
+      ...(latest ? { latest } : {}),
+      ...(historyLatest ? { historyLatest } : {}),
+    };
   }
 
   const channelTarget = normalizeSlackChannelTarget(rawChannel);
   if (!channelTarget) {
-    return { ...(oldest ? { oldest } : {}), ...(latest ? { latest } : {}) };
+    return {
+      ...(oldest ? { oldest } : {}),
+      ...(latest ? { latest } : {}),
+      ...(historyLatest ? { historyLatest } : {}),
+    };
   }
   if ('error' in channelTarget) {
     throw new Error(channelTarget.error);
@@ -710,6 +723,7 @@ function parseChannelMessagesRequestBody(body: unknown): {
 
   return {
     channel: channelTarget.value,
+    ...(historyLatest ? { historyLatest } : {}),
     ...(oldest ? { oldest } : {}),
     ...(latest ? { latest } : {}),
   };
@@ -1969,6 +1983,7 @@ slackMcp.post('/channel_messages', async (c) => {
     channel?: string;
     oldest?: string;
     latest?: string;
+    historyLatest?: string;
   };
   try {
     parsedBody = parseChannelMessagesRequestBody(await c.req.json());
@@ -1981,6 +1996,9 @@ slackMcp.post('/channel_messages', async (c) => {
 
   try {
     const payload = await lookupSlackChannelMessages({
+      ...(typeof parsedBody.historyLatest === 'string'
+        ? { historyLatest: parsedBody.historyLatest }
+        : {}),
       ...(typeof parsedBody.channel === 'string'
         ? { channel: parsedBody.channel }
         : {}),

@@ -9,6 +9,8 @@ import {
   SHOW_WIDGET_THEME_GUIDANCE,
 } from '@roomote/cloud-agents/show-widget';
 import {
+  CHAT_CHANNEL_MESSAGES_TOOL,
+  CHAT_MESSAGE_SEND_TOOL,
   CREATE_CUSTOM_SKILL_TOOL,
   CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH,
   MANAGE_CUSTOM_AUTOMATIONS_TOOL,
@@ -1017,15 +1019,26 @@ describe('roomote MCP tool descriptions', () => {
     const channelField = getInputSchemaField(lookupTool, 'channel');
     const oldestField = getInputSchemaField(lookupTool, 'oldest');
     const latestField = getInputSchemaField(lookupTool, 'latest');
+    const historyLatestField = getInputSchemaField(lookupTool, 'historyLatest');
 
     expect(lookupTool.config.description).toBe(
-      'Fetch readable history from the task communication channel. When the task has no communication channel, or when another channel is needed, provide a Slack or Discord channel/message link. Provider-specific access checks still apply. Large results are cut to the newest messages: when the response has truncated set, call again with latest set to nextLatest (and the same oldest) to read older messages.',
+      CHAT_CHANNEL_MESSAGES_TOOL.description,
+    );
+    expect(lookupTool.config.description).toContain('sizeContinuation');
+    expect(lookupTool.config.description).toContain('historyContinuation');
+    expect(lookupTool.config.description).toContain(
+      'Retain both independently',
     );
     expect(channelField.description).toBe(
       'Optional channel ID, name, mention, or Slack/Discord channel/message link. Omit it to use the task communication channel.',
     );
     expect(oldestField.description).toContain('Slack timestamp');
     expect(latestField.description).toContain('message snowflake');
+    expect(historyLatestField.description).toBe(
+      CHAT_CHANNEL_MESSAGES_TOOL.inputDescriptions.historyLatest,
+    );
+    expect(historyLatestField.description).toContain('root-history');
+    expect(historyLatestField.description).toContain('Keep latest');
   });
 
   it('gives delegated coding tasks only the private parent Session report tool', async () => {
@@ -1285,7 +1298,12 @@ describe('roomote MCP tool descriptions', () => {
 
     expect(messageField.description).toBe('Markdown message to send.');
     expect(postTool.config.description).toBe(
-      'Send a new standalone Markdown message to an authorized destination. First use list_chat_destinations and pass its exact destination reference unchanged. Self destinations resolve only from the authenticated member; Slack people and channels retain workspace linkage and access checks. A trusted Slack channel reference may append :thread:<message timestamp>. Use send_chat_reply for the current conversation, including a custom automation result for its configured channel. Never infer or alter a destination reference. Worker tasks may also attach image paths or already-uploaded artifact IDs; attachment ownership is verified against the current task run.',
+      `${CHAT_MESSAGE_SEND_TOOL.description} Worker tasks may also attach image paths or already-uploaded artifact IDs; attachment ownership is verified against the current task run.`,
+    );
+    expect(postTool.config.description).toContain('list_chat_destinations');
+    expect(postTool.config.description).toContain('Use send_chat_reply');
+    expect(postTool.config.description).toContain(
+      'Never infer or alter a destination reference.',
     );
     expect(postTool.config.description).not.toContain(
       '<slack_modern_markdown>',
