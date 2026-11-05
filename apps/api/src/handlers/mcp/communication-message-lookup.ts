@@ -170,6 +170,7 @@ export async function lookupCommunicationChannelMessages(options: {
   channel?: string;
   oldest?: string;
   latest?: string;
+  historyLatest?: string;
   provider?: SupportedCommunicationLookupProvider;
   taskRun?: CommunicationLookupTaskRun | null;
   actingUserId?: string | null;
@@ -198,6 +199,7 @@ export async function lookupCommunicationChannelMessages(options: {
         : {}),
     ...(options.oldest ? { oldest: options.oldest } : {}),
     ...(options.latest ? { latest: options.latest } : {}),
+    ...(options.historyLatest ? { historyLatest: options.historyLatest } : {}),
     ...(reference?.workspaceId ? { workspaceId: reference.workspaceId } : {}),
     ...(reference?.workspaceDomain
       ? { workspaceDomain: reference.workspaceDomain }

@@ -56,8 +56,22 @@ export type CommunicationChannelMessagesPayload = {
   channelId: string;
   requestedOldest?: string;
   requestedLatest?: string;
+  requestedHistoryLatest?: string;
+  /** Independent pending reads; process both and deduplicate messages by ID. */
+  historyContinuation?: ChannelMessagesContinuation;
+  sizeContinuation?: ChannelMessagesContinuation;
+  /** Set for a partial read; see `note` and the independent continuations. */
+  truncated?: true;
+  nextLatest?: string;
+  note?: string;
   messageCount: number;
   messages: CommunicationLookupMessage[];
+};
+
+export type ChannelMessagesContinuation = {
+  oldest?: string;
+  latest?: string;
+  historyLatest?: string;
 };
 
 export type CommunicationLookupStrategy = {
@@ -79,6 +93,7 @@ export type CommunicationLookupStrategy = {
     workspaceDomain?: string;
     oldest?: string;
     latest?: string;
+    historyLatest?: string;
     taskRun?: CommunicationLookupTaskRun | null;
     actingUserId?: string | null;
   }): Promise<CommunicationChannelMessagesPayload>;

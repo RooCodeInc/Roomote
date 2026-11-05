@@ -166,6 +166,9 @@ const slackLookupStrategy: CommunicationLookupStrategy = {
       ...(options.channel ? { channel: options.channel } : {}),
       ...(options.oldest ? { oldest: options.oldest } : {}),
       ...(options.latest ? { latest: options.latest } : {}),
+      ...(options.historyLatest
+        ? { historyLatest: options.historyLatest }
+        : {}),
       ...(options.workspaceId ? { slackTeamId: options.workspaceId } : {}),
       ...(options.workspaceDomain
         ? { slackTeamDomain: options.workspaceDomain }
@@ -188,6 +191,15 @@ const slackLookupStrategy: CommunicationLookupStrategy = {
       ...(result.requestedLatest
         ? { requestedLatest: result.requestedLatest }
         : {}),
+      ...(result.truncated ? { truncated: result.truncated } : {}),
+      ...(result.nextLatest ? { nextLatest: result.nextLatest } : {}),
+      ...(result.requestedHistoryLatest
+        ? { requestedHistoryLatest: result.requestedHistoryLatest }
+        : {}),
+      ...(result.historyContinuation
+        ? { historyContinuation: result.historyContinuation }
+        : {}),
+      ...(result.note ? { note: result.note } : {}),
       messageCount: result.messageCount,
       messages: result.messages.map((message) => ({
         provider: 'slack',

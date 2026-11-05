@@ -76,7 +76,29 @@ export function applyChannelMessagesResultBudget(
       truncated: true,
       omittedMessageCount: omitted,
       ...(newestOmitted ? { nextLatest: newestOmitted.id } : {}),
-      note: `Result truncated to the newest ${subset.length} of ${messages.length} messages in the requested range. To read the older messages, call again with latest set to nextLatest and the same oldest; that page will not repeat any message returned here.`,
+      ...(newestOmitted
+        ? {
+            sizeContinuation: {
+              ...(payload.requestedOldest
+                ? { oldest: payload.requestedOldest }
+                : {}),
+              latest: newestOmitted.id,
+              ...(payload.provider === 'slack'
+                ? {
+                    historyLatest:
+                      payload.requestedHistoryLatest ?? payload.requestedLatest,
+                  }
+                : {}),
+            },
+          }
+        : {}),
+      note: [
+        `Result truncated to the newest ${subset.length} of ${messages.length} messages. Call again with sizeContinuation and the same channel/provider. Retain historyContinuation independently; process all further continuations with their own bounds and deduplicate by ID.`,
+        // A provider read that already stopped early keeps its explanation.
+        payload.note,
+      ]
+        .filter(Boolean)
+        .join(' '),
     };
   };
 

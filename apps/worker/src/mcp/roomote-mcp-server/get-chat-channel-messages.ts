@@ -7,6 +7,7 @@ export async function handleGetChatChannelMessages(
     channel?: string;
     oldest?: string;
     latest?: string;
+    historyLatest?: string;
   },
   roomoteConfig: RoomoteConfig,
 ): Promise<ToolResult> {
@@ -14,12 +15,14 @@ export async function handleGetChatChannelMessages(
     const channel = input.channel?.trim();
     const oldest = input.oldest?.trim();
     const latest = input.latest?.trim();
+    const historyLatest = input.historyLatest?.trim();
 
     return jsonResult(
       await getChatChannelMessages(roomoteConfig, {
         ...(channel ? { channel } : {}),
         ...(oldest ? { oldest } : {}),
         ...(latest ? { latest } : {}),
+        ...(historyLatest ? { historyLatest } : {}),
       }),
     );
   } catch (error) {
