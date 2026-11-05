@@ -208,6 +208,39 @@ describe('on-demand integration tools', () => {
     expect(warn.mock.calls.flat().join(' ')).not.toContain('customer');
   });
 
+  it('returns an integration note with every lookup that covers it, even an empty one', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const noted: OnDemandMcpCatalog = {
+      servers: catalog.servers.map((server) =>
+        server.name === 'github'
+          ? { ...server, note: 'Writes go through gh.' }
+          : server,
+      ),
+    };
+
+    const empty = parse(
+      await findOnDemandIntegrationTools(
+        noted,
+        { integrationId: 'github', toolName: 'run_workflow' },
+        listTools,
+      ),
+    );
+    expect(empty).toMatchObject({
+      tools: [],
+      emptyReason: 'no_filter_match',
+      integrationNotes: { github: 'Writes go through gh.' },
+    });
+
+    const other = parse(
+      await findOnDemandIntegrationTools(
+        noted,
+        { integrationId: 'linear' },
+        listTools,
+      ),
+    );
+    expect(other).not.toHaveProperty('integrationNotes');
+  });
+
   it('lists every scoped server at once so one slow server does not serialize the lookup', async () => {
     let releaseSlow!: () => void;
     const slowListing = new Promise<never[]>((resolve) => {
