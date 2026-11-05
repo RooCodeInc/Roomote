@@ -119,7 +119,7 @@ export function SessionSelection({
       value={{ active, pending, selected, toggle }}
     >
       <div className="flex flex-wrap items-center gap-3 border-b-4 border-b-card bg-background p-4">
-        <div className="min-w-0 flex-1">{toolbar}</div>
+        <div className="min-w-0 flex-auto">{toolbar}</div>
         {active ? (
           <div
             className="flex items-center gap-2"
