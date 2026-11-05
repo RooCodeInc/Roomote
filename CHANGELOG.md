@@ -2,6 +2,23 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.20.1 (2026-11-05)
+
+Roomote 1.20.1 restores reliable Copilot task helpers, keeps Slack history reads useful in busy channels, and clarifies how agents carry out Slack replies and GitHub actions.
+
+### Highlights
+
+- Restore GitHub Copilot GPT-5.x task helpers that failed on an unsupported endpoint.
+- Keep available Slack history when a busy channel cannot be read completely in one request.
+- Avoid false lost-access reports for private Slack conversations and false refusals of authorized GitHub actions.
+
+### Patch changes
+
+- GitHub Copilot GPT-5.x task helpers use the correct inference endpoint instead of failing on requests sent to an unsupported endpoint.
+- Coding tasks recognize their authorized GitHub write path when integration tools are read-only, avoiding false refusals to carry out requested pull request updates, comments, or workflow actions.
+- Slack channel history reads return accumulated messages with explicit partial-result and continuation information instead of timing out and losing all results in busy channels.
+- Slack destination guidance distinguishes unlisted private channels from lost access and directs replies, including automation results, to the current conversation without requiring standalone channel discovery.
+
 ## 1.20.0 (2026-11-04)
 
 Roomote 1.20.0 adds MCP connection controls and testing, stops runaway agent activity, and includes security updates for redirects and static-file serving.

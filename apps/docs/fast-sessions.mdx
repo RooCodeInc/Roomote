@@ -380,7 +380,11 @@ channel-access checks. It does not infer access from the originating chat.
 
 Roomote uses one destination lookup and one send action for explicitly requested
 standalone messages. The lookup can return your linked Slack or Telegram account,
-linked people in shared Slack workspaces, and accessible Slack channels. Each
+linked people in shared Slack workspaces, and public Slack channels the Roomote
+app has joined. Private channels are not listed, so a missing channel does not
+mean Slack access was lost. Replies in the current conversation, including an
+automation's configured report channel, do not depend on finding that channel
+in the standalone destination lookup. Each
 lookup names one provider and destination kind. Self lookup resolves only your
 authenticated identity; people and channel lookup requires a targeted search or
 an exact destination reference. Results are bounded and include a continuation
