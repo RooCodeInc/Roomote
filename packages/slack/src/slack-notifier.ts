@@ -22,6 +22,7 @@ import {
   fetchSlackGetJson,
   getSlackRetryAfterMs,
   slackFetch,
+  SLACK_REQUEST_TIMEOUT_MS,
   SLACK_DOWNLOAD_TIMEOUT_MS,
 } from './slack-api-fetch';
 import type {
@@ -35,6 +36,19 @@ import {
   appendSlackForwardedMessageFiles,
   formatSlackAttachmentContext,
 } from './forwarded-message-context';
+
+class SlackChannelDeadlineError extends Error {}
+
+function slackDeadlineOptions(deadlineAt?: number): { timeoutMs?: number } {
+  return deadlineAt === undefined
+    ? {}
+    : {
+        timeoutMs: Math.min(
+          SLACK_REQUEST_TIMEOUT_MS,
+          Math.max(1, deadlineAt - Date.now()),
+        ),
+      };
+}
 
 type SlackApiThreadMessage = {
   user?: string;
@@ -421,56 +435,64 @@ export class SlackNotifier {
     return this.channelDiscovery;
   }
 
-  private async getOwnBotIdentity(): Promise<{
+  private async getOwnBotIdentity(deadlineAt?: number): Promise<{
     userId?: string;
     botId?: string;
     teamId?: string;
     teamDomain?: string;
   } | null> {
-    if (!this.ownBotIdentityPromise) {
-      this.ownBotIdentityPromise = (async () => {
-        try {
-          const response = await slackFetch(buildSlackApiUrl('auth.test'), {
+    const loadIdentity = async () => {
+      if (deadlineAt !== undefined && Date.now() >= deadlineAt) return null;
+      try {
+        const response = await slackFetch(
+          buildSlackApiUrl('auth.test'),
+          {
             method: 'POST',
             headers: {
               Authorization: `Bearer ${this.token}`,
               'Content-Type': 'application/x-www-form-urlencoded',
             },
-          });
+          },
+          slackDeadlineOptions(deadlineAt),
+        );
 
-          if (!response.ok) {
-            console.error(
-              `[getOwnBotIdentity] Slack auth.test failed: ${response.status} ${response.statusText}`,
-            );
-            return null;
-          }
-
-          const result: SlackAuthTestResponse = await response.json();
-
-          if (!result.ok) {
-            console.error(
-              `[getOwnBotIdentity] Slack auth.test error: ${result.error || 'Unknown error'}`,
-            );
-            return null;
-          }
-
-          if (!result.user_id && !result.bot_id) {
-            return null;
-          }
-
-          return {
-            userId: result.user_id,
-            botId: result.bot_id,
-            teamId: result.team_id,
-            teamDomain: getSlackWorkspaceDomain(result.url) ?? undefined,
-          };
-        } catch (error) {
+        if (!response.ok) {
           console.error(
-            `[getOwnBotIdentity] Failed to fetch Slack bot identity: ${error instanceof Error ? error.message : String(error)}`,
+            `[getOwnBotIdentity] Slack auth.test failed: ${response.status} ${response.statusText}`,
           );
           return null;
         }
-      })();
+
+        const result: SlackAuthTestResponse = await response.json();
+
+        if (!result.ok) {
+          console.error(
+            `[getOwnBotIdentity] Slack auth.test error: ${result.error || 'Unknown error'}`,
+          );
+          return null;
+        }
+
+        if (!result.user_id && !result.bot_id) {
+          return null;
+        }
+
+        return {
+          userId: result.user_id,
+          botId: result.bot_id,
+          teamId: result.team_id,
+          teamDomain: getSlackWorkspaceDomain(result.url) ?? undefined,
+        };
+      } catch (error) {
+        console.error(
+          `[getOwnBotIdentity] Failed to fetch Slack bot identity: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        return null;
+      }
+    };
+    // A budgeted read cannot join an identity request with a longer lifetime.
+    if (deadlineAt !== undefined) return loadIdentity();
+    if (!this.ownBotIdentityPromise) {
+      this.ownBotIdentityPromise = loadIdentity();
     }
 
     const ownBotIdentity = await this.ownBotIdentityPromise;
@@ -502,6 +524,7 @@ export class SlackNotifier {
     messages: SlackApiThreadMessage[],
     options: {
       excludeOwnBot?: boolean;
+      deadlineAt?: number;
     } = {},
   ): Promise<SlackChannelMessage[]> {
     const needsOwnBotId =
@@ -510,7 +533,7 @@ export class SlackNotifier {
         SUGGESTION_REACTION_START_NOTICE_REGEX.test(msg.text ?? ''),
       );
     const ownBotIdentity = needsOwnBotId
-      ? await this.getOwnBotIdentity()
+      ? await this.getOwnBotIdentity(options.deadlineAt)
       : null;
 
     const normalizedInput = messages
@@ -551,7 +574,9 @@ export class SlackNotifier {
 
     const usernameMap =
       userIds.length > 0
-        ? await this.getUsersInfo(userIds)
+        ? await (options.deadlineAt === undefined
+            ? this.getUsersInfo(userIds)
+            : this.getUsersInfo(userIds, options.deadlineAt))
         : new Map<string, string>();
 
     return filteredMessages.map((msg) => ({
@@ -2168,7 +2193,10 @@ export class SlackNotifier {
    * @param userIds - Array of Slack user IDs to fetch information for
    * @returns Map of user IDs to display names
    */
-  private async getUsersInfo(userIds: string[]): Promise<Map<string, string>> {
+  private async getUsersInfo(
+    userIds: string[],
+    deadlineAt?: number,
+  ): Promise<Map<string, string>> {
     const usernameMap = new Map<string, string>();
 
     // Fetch user info for each unique user ID
@@ -2176,6 +2204,7 @@ export class SlackNotifier {
 
     await Promise.all(
       uniqueUserIds.map(async (userId) => {
+        if (deadlineAt !== undefined && Date.now() >= deadlineAt) return;
         try {
           const response = await slackFetch(
             `${buildSlackApiUrl('users.info')}?user=${encodeURIComponent(userId)}`,
@@ -2186,6 +2215,7 @@ export class SlackNotifier {
                 'Content-Type': 'application/x-www-form-urlencoded',
               },
             },
+            slackDeadlineOptions(deadlineAt),
           );
 
           if (!response.ok) {
@@ -2244,12 +2274,14 @@ export class SlackNotifier {
     oldest,
     latest,
     excludeOwnBot = false,
+    deadlineAt,
   }: {
     channel: string;
     threadTs: string;
     oldest?: string;
     latest?: string;
     excludeOwnBot?: boolean;
+    deadlineAt?: number;
   }): Promise<SlackThreadMessage[]> {
     try {
       const params = new URLSearchParams({
@@ -2272,11 +2304,16 @@ export class SlackNotifier {
       const result = await this.fetchThreadResponse(
         params,
         'fetchThreadMessages',
+        deadlineAt,
       );
 
-      if (!result) return [];
+      if (!result) {
+        if (deadlineAt !== undefined) throw new SlackChannelDeadlineError();
+        return [];
+      }
 
       if (!result.ok) {
+        if (deadlineAt !== undefined) throw new SlackChannelDeadlineError();
         console.error(
           `[fetchThreadMessages] Slack conversations.replies error: ${result.error || 'Unknown error'}`,
         );
@@ -2285,8 +2322,10 @@ export class SlackNotifier {
 
       return await this.normalizeFetchedMessages(result.messages, {
         excludeOwnBot,
+        deadlineAt,
       });
     } catch (error) {
+      if (error instanceof SlackChannelDeadlineError) throw error;
       console.error(
         `[fetchThreadMessages] Failed to fetch Slack thread messages: ${error instanceof Error ? error.message : String(error)}`,
       );
@@ -2309,6 +2348,7 @@ export class SlackNotifier {
       | 'fetchMessageBlocks'
       | 'getMessageMetadata'
       | 'getMessage',
+    deadlineAt?: number,
   ): Promise<SlackApiThreadResponse | null> {
     // Full thread snapshots tolerate a short cache. Existence/identity checks
     // must see current state, and block reads protect read-modify-write callers
@@ -2321,7 +2361,8 @@ export class SlackNotifier {
       context === 'fetchMessageBlocks'
         ? 1
         : MAX_SLACK_CONVERSATIONS_REPLIES_RATE_LIMIT_RETRIES;
-    const requestKey = `${cacheKey}:retries=${maxRateLimitRetries}`;
+    // Budgeted reads must never join an unbudgeted request/retry sleep.
+    const requestKey = `${cacheKey}:retries=${maxRateLimitRetries}:deadline=${deadlineAt ?? 'none'}`;
     const getCachedResponse = (): SlackApiThreadResponse | null => {
       if (!cacheable) return null;
       const cached = this.threadResponseCache.get(cacheKey);
@@ -2346,6 +2387,8 @@ export class SlackNotifier {
         retryCount += 1
       ) {
         try {
+          if (deadlineAt !== undefined && Date.now() >= deadlineAt)
+            throw new SlackChannelDeadlineError();
           if (retryCount > 0) {
             const cached = getCachedResponse();
             if (cached) return cached;
@@ -2360,6 +2403,7 @@ export class SlackNotifier {
                 'Content-Type': 'application/x-www-form-urlencoded',
               },
             },
+            slackDeadlineOptions(deadlineAt),
           );
 
           if (response.status === 429) {
@@ -2380,15 +2424,14 @@ export class SlackNotifier {
                 ? getSlackRetryAfterMs(retryAfterHeader)
                 : DEFAULT_SLACK_CONVERSATIONS_REPLIES_BACKOFF_MS *
                   2 ** retryCount;
-            await new Promise((resolve) =>
-              setTimeout(
-                resolve,
-                Math.min(
-                  retryAfterMs + jitterMs,
-                  MAX_SLACK_CONVERSATIONS_REPLIES_RATE_LIMIT_WAIT_MS,
-                ),
-              ),
+            const waitMs = Math.min(
+              retryAfterMs + jitterMs,
+              MAX_SLACK_CONVERSATIONS_REPLIES_RATE_LIMIT_WAIT_MS,
             );
+            if (deadlineAt !== undefined && waitMs >= deadlineAt - Date.now()) {
+              throw new SlackChannelDeadlineError();
+            }
+            await new Promise((resolve) => setTimeout(resolve, waitMs));
             continue;
           }
 
@@ -2420,6 +2463,12 @@ export class SlackNotifier {
           }
           return result;
         } catch (error) {
+          if (
+            deadlineAt !== undefined &&
+            (error instanceof SlackChannelDeadlineError ||
+              Date.now() >= deadlineAt)
+          )
+            throw new SlackChannelDeadlineError();
           console.error(
             `[${context}] Failed to fetch Slack thread messages: ${error instanceof Error ? error.message : String(error)}`,
           );
@@ -2445,6 +2494,7 @@ export class SlackNotifier {
     oldest?: string;
     latest?: string;
     cursor?: string;
+    deadlineAt?: number;
   }): Promise<SlackApiThreadResponse> {
     const query = new URLSearchParams({
       channel: params.channel,
@@ -2473,6 +2523,7 @@ export class SlackNotifier {
           'Content-Type': 'application/x-www-form-urlencoded',
         },
       },
+      slackDeadlineOptions(params.deadlineAt),
     );
 
     if (!response.ok) {
@@ -2497,15 +2548,51 @@ export class SlackNotifier {
    * time window. Thread replies are expanded and included alongside top-level
    * channel messages.
    */
-  public async fetchChannelMessages({
-    channel,
-    oldest,
-    latest,
-  }: {
+  public async fetchChannelMessages(params: {
     channel: string;
     oldest?: string;
     latest?: string;
   }): Promise<SlackChannelMessage[]> {
+    return (await this.fetchChannelMessagesWithinBudget(params)).messages;
+  }
+
+  /**
+   * Like `fetchChannelMessages`, but stops issuing Slack requests once
+   * `deadlineAt` (epoch ms) passes and returns what it has, marked incomplete.
+   * Busy channels with many threads, or Slack tiers that allow one history
+   * request per minute, can otherwise outlast the caller's timeout and return
+   * nothing at all.
+   */
+  public async fetchChannelMessagesWithinBudget({
+    channel,
+    oldest,
+    latest,
+    deadlineAt,
+    historyLatest,
+  }: {
+    channel: string;
+    oldest?: string;
+    latest?: string;
+    deadlineAt?: number;
+    /** Root pagination bound; replies retain the original latest bound. */
+    historyLatest?: string;
+  }): Promise<{
+    messages: SlackChannelMessage[];
+    incomplete?: {
+      /** Oldest top-level message fetched when history paging stopped early. */
+      historyStoppedAtTs?: string;
+      /** Threads whose replies in the window were not fetched. */
+      unexpandedThreadCount?: number;
+      staleRootDiscoveryIncomplete?: boolean;
+      historyIncomplete?: boolean;
+    };
+  }> {
+    const pastDeadline = () =>
+      deadlineAt !== undefined && Date.now() >= deadlineAt;
+    let historyStoppedAtTs: string | undefined;
+    let unexpandedThreadCount = 0;
+    let staleRootDiscoveryIncomplete = false;
+    let historyIncomplete = false;
     const historyMessages: SlackApiThreadMessage[] = [];
     const threadRootTimestamps = new Set<string>();
     const oldestTs = parseSlackTimestamp(oldest);
@@ -2515,14 +2602,30 @@ export class SlackNotifier {
 
     try {
       do {
+        if (pastDeadline()) {
+          historyIncomplete = true;
+          break;
+        }
         historyPageCount += 1;
 
         const result = await this.fetchChannelHistoryPage({
           channel,
           ...(oldest ? { oldest } : {}),
-          ...(latest ? { latest } : {}),
+          ...((historyLatest ?? latest)
+            ? { latest: historyLatest ?? latest }
+            : {}),
           ...(cursor ? { cursor } : {}),
+          deadlineAt,
+        }).catch((error) => {
+          if (
+            !pastDeadline() &&
+            !(deadlineAt !== undefined && historyMessages.length > 0)
+          )
+            throw error;
+          historyIncomplete = true;
+          return null;
         });
+        if (!result) break;
 
         historyMessages.push(...result.messages);
         for (const message of result.messages) {
@@ -2532,6 +2635,19 @@ export class SlackNotifier {
         }
 
         cursor = result.response_metadata?.next_cursor || undefined;
+
+        if (cursor && pastDeadline() && historyMessages.length > 0) {
+          // History pages arrive newest first, so the oldest part of the
+          // window is what remains unread.
+          historyStoppedAtTs = historyMessages.reduce(
+            (oldestSeen, message) =>
+              Number.parseFloat(message.ts) < Number.parseFloat(oldestSeen)
+                ? message.ts
+                : oldestSeen,
+            historyMessages[0]!.ts,
+          );
+          break;
+        }
 
         if (
           oldestTs !== null &&
@@ -2544,7 +2660,24 @@ export class SlackNotifier {
         }
       } while (cursor);
 
-      if (oldest && oldestTs !== null) {
+      if (historyIncomplete && historyMessages.length > 0) {
+        historyStoppedAtTs = historyMessages.reduce(
+          (ts, message) => (Number(message.ts) < Number(ts) ? message.ts : ts),
+          historyMessages[0]!.ts,
+        );
+      }
+      staleRootDiscoveryIncomplete = Boolean(
+        oldest &&
+        oldestTs !== null &&
+        (pastDeadline() || historyIncomplete || historyStoppedAtTs),
+      );
+
+      if (
+        oldest &&
+        oldestTs !== null &&
+        !pastDeadline() &&
+        !historyStoppedAtTs
+      ) {
         // Best effort: the bounded read above is the primary result. Some
         // Slack tiers only allow one history request per minute, so a failed
         // lookback must not turn an otherwise successful read into an error.
@@ -2553,12 +2686,17 @@ export class SlackNotifier {
           let lookbackPageCount = 0;
 
           do {
+            if (pastDeadline()) {
+              staleRootDiscoveryIncomplete = true;
+              break;
+            }
             lookbackPageCount += 1;
 
             const result = await this.fetchChannelHistoryPage({
               channel,
               latest: oldest,
               ...(lookbackCursor ? { cursor: lookbackCursor } : {}),
+              deadlineAt,
             });
 
             for (const message of result.messages) {
@@ -2573,23 +2711,36 @@ export class SlackNotifier {
             lookbackPageCount < MAX_STALE_THREAD_ROOT_LOOKBACK_PAGES
           );
         } catch (error) {
+          if (deadlineAt !== undefined) staleRootDiscoveryIncomplete = true;
           console.warn(
             `[fetchChannelMessages] Skipping stale thread root lookback: ${error instanceof Error ? error.message : String(error)}`,
           );
         }
       }
 
-      const rootMessages = await this.normalizeFetchedMessages(historyMessages);
+      const rootMessages = await this.normalizeFetchedMessages(
+        historyMessages,
+        { deadlineAt },
+      );
       const messagesByTs = new Map(
         rootMessages.map((message) => [message.ts, message]),
       );
 
       for (const threadTs of threadRootTimestamps) {
+        if (pastDeadline()) {
+          unexpandedThreadCount += 1;
+          continue;
+        }
         const threadMessages = await this.fetchThreadMessages({
           channel,
           threadTs,
           ...(oldest ? { oldest } : {}),
           ...(latest ? { latest } : {}),
+          deadlineAt,
+        }).catch((error) => {
+          if (!(error instanceof SlackChannelDeadlineError)) throw error;
+          unexpandedThreadCount += 1;
+          return [];
         });
 
         for (const message of threadMessages) {
@@ -2604,7 +2755,7 @@ export class SlackNotifier {
         }
       }
 
-      return [...messagesByTs.values()]
+      const messages = [...messagesByTs.values()]
         .sort((a, b) => Number.parseFloat(a.ts) - Number.parseFloat(b.ts))
         .filter((message) => {
           const numericTs = Number.parseFloat(message.ts);
@@ -2616,6 +2767,23 @@ export class SlackNotifier {
           }
           return true;
         });
+
+      return historyIncomplete ||
+        historyStoppedAtTs ||
+        unexpandedThreadCount > 0 ||
+        staleRootDiscoveryIncomplete
+        ? {
+            messages,
+            incomplete: {
+              ...(historyStoppedAtTs ? { historyStoppedAtTs } : {}),
+              ...(unexpandedThreadCount > 0 ? { unexpandedThreadCount } : {}),
+              ...(historyIncomplete ? { historyIncomplete: true } : {}),
+              ...(staleRootDiscoveryIncomplete
+                ? { staleRootDiscoveryIncomplete: true }
+                : {}),
+            },
+          }
+        : { messages };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error(

@@ -84,7 +84,7 @@ export async function sendCommunicationMessage(params: {
       {
         code: 'invalid_destination',
         error:
-          'Use an exact destination returned by list_chat_destinations or a trusted current-destination reference.',
+          'Use an exact destination returned by list_chat_destinations or a trusted current-destination reference. To post in the current conversation, including a custom automation result for its configured channel, use send_chat_reply instead.',
       },
       400,
     );

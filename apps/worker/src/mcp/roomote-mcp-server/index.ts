@@ -1639,6 +1639,10 @@ if (!isFastAgentChild()) {
           .string()
           .optional()
           .describe(CHAT_CHANNEL_MESSAGES_TOOL.inputDescriptions.latest),
+        historyLatest: z
+          .string()
+          .optional()
+          .describe(CHAT_CHANNEL_MESSAGES_TOOL.inputDescriptions.historyLatest),
       },
       annotations: {
         readOnlyHint: true,
@@ -1658,6 +1662,7 @@ if (!isFastAgentChild()) {
           channel: params.channel,
           oldest: params.oldest,
           latest: params.latest,
+          historyLatest: params.historyLatest,
         },
         roomoteConfig,
       );

@@ -164,7 +164,7 @@ export const CHAT_MESSAGE_SEND_TOOL = {
   name: 'send_chat_message',
   title: 'Send Chat Message',
   description:
-    'Send a new standalone Markdown message to an authorized destination. First use list_chat_destinations and pass its exact destination reference unchanged. Self destinations resolve only from the authenticated member; Slack people and channels retain workspace linkage and access checks. A trusted Slack channel reference may append :thread:<message timestamp>. Use send_chat_reply for the current conversation. Never infer or alter a destination reference.',
+    'Send a new standalone Markdown message to an authorized destination. First use list_chat_destinations and pass its exact destination reference unchanged. Self destinations resolve only from the authenticated member; Slack people and channels retain workspace linkage and access checks. A trusted Slack channel reference may append :thread:<message timestamp>. Use send_chat_reply for the current conversation, including a custom automation result for its configured channel. Never infer or alter a destination reference.',
   inputDescriptions: {
     destination:
       'Exact destination reference from list_chat_destinations, or a trusted Slack channel reference with an optional :thread:<message timestamp> suffix.',
@@ -203,7 +203,7 @@ export const CHAT_CHANNEL_MESSAGES_TOOL = {
   name: 'get_chat_channel_messages',
   title: 'Get Chat Channel Messages',
   description:
-    'Fetch readable history from the task communication channel. When the task has no communication channel, or when another channel is needed, provide a Slack or Discord channel/message link. Provider-specific access checks still apply. Large results are cut to the newest messages: when the response has truncated set, call again with latest set to nextLatest (and the same oldest) to read older messages.',
+    'Fetch readable history from the task communication channel. When the task has no communication channel, or when another channel is needed, provide a Slack or Discord channel/message link. Provider-specific access checks still apply. Partial results can include sizeContinuation and historyContinuation: call again with each object as input fields and the same channel/provider. Retain both independently, process any further continuations, and deduplicate messages by ID. Follow the note for unread thread replies or stale-thread discovery.',
   inputDescriptions: {
     channel:
       'Optional channel ID, name, mention, or Slack/Discord channel/message link. Omit it to use the task communication channel.',
@@ -211,6 +211,8 @@ export const CHAT_CHANNEL_MESSAGES_TOOL = {
       'Optional inclusive lower message bound. Use a Slack timestamp or ISO 8601 date for Slack, or a message snowflake for Discord.',
     latest:
       'Optional inclusive upper message bound. Use a Slack timestamp or ISO 8601 date for Slack, or a message snowflake for Discord.',
+    historyLatest:
+      'Optional Slack root-history pagination bound from a continuation. Keep latest from that continuation unchanged so newer replies on older roots remain visible.',
   },
 } as const;
 

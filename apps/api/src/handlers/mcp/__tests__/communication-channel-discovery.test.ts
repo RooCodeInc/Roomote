@@ -397,6 +397,30 @@ describe('listCommunicationChannels', () => {
     expect(findSlackUserMappingsMock).not.toHaveBeenCalled();
   });
 
+  it('explains that private Slack channels are not listed and points to send_chat_reply', async () => {
+    findSlackInstallationsMock.mockResolvedValue([
+      { botAccessToken: 'token-1', teamId: 'T1', teamName: 'One' },
+    ]);
+    listPublicChannelsMock.mockResolvedValue([
+      { id: 'CPRIV', name: 'team-private', isPrivate: true, isMember: true },
+    ]);
+
+    const result = await listCommunicationDestinations({
+      actingUserId: 'user-1',
+      provider: 'slack',
+      kind: 'channel',
+      query: 'team-private',
+    });
+
+    expect(result.destinations).toEqual([]);
+    expect(result.limitations).toEqual([
+      expect.objectContaining({
+        provider: 'slack',
+        reason: expect.stringContaining('use send_chat_reply'),
+      }),
+    ]);
+  });
+
   it('paginates targeted linked-person search inside one Slack workspace', async () => {
     findSlackInstallationsMock.mockResolvedValue([
       { botAccessToken: 'token-1', teamId: 'T1', teamName: 'One' },

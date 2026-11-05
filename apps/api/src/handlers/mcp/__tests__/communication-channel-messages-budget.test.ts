@@ -57,7 +57,7 @@ describe('applyChannelMessagesResultBudget', () => {
     expect(result.messages.map(({ id }) => id)).not.toContain(
       result.nextLatest,
     );
-    expect(result.note).toContain('nextLatest');
+    expect(result.note).toContain('sizeContinuation');
     expect(JSON.stringify(result, null, 2).length).toBeLessThanOrEqual(
       CHANNEL_MESSAGES_RESULT_BUDGET_CHARS,
     );
@@ -73,6 +73,37 @@ describe('applyChannelMessagesResultBudget', () => {
     expect(result.truncated).toBe(true);
     expect(JSON.stringify(result, null, 2).length).toBeLessThanOrEqual(900);
     expect(result.messages.at(-1)).toEqual(messages.at(-1));
+  });
+
+  it('retains independent history and size continuations with their original bounds', () => {
+    const messages = Array.from({ length: 20 }, (_, index) =>
+      message(index, 600),
+    );
+    const historyContinuation = {
+      oldest: '100.000',
+      latest: '300.000',
+      historyLatest: '150.000',
+    };
+    const result = applyChannelMessagesResultBudget(
+      {
+        ...payload(messages),
+        requestedOldest: '100.000',
+        requestedLatest: '300.000',
+        requestedHistoryLatest: '200.000',
+        truncated: true,
+        historyContinuation,
+        note: 'Partial provider read.',
+      },
+      3000,
+    );
+    expect(result.historyContinuation).toEqual(historyContinuation);
+    expect(result.sizeContinuation).toEqual({
+      oldest: '100.000',
+      latest: result.nextLatest,
+      historyLatest: '200.000',
+    });
+    expect(result.note).toContain('Partial provider read.');
+    expect(JSON.stringify(result, null, 2).length).toBeLessThanOrEqual(3000);
   });
 
   it('never drops below one message', () => {
