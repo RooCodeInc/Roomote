@@ -182,6 +182,14 @@ const ROOMOTE_OPENCODE_SLACK_SILENCE_HOOK_FILE_NAME =
 const ROOMOTE_OPENCODE_PLUGINS_DIR_NAME = 'plugins';
 const ROOMOTE_OPENCODE_ON_DEMAND_MCP_CATALOG_FILE_NAME =
   'on-demand-mcp-servers.json';
+/**
+ * The task's GitHub tools are read-only while its checkout's `git` and `gh`
+ * carry the same installation credentials with write access. Say so wherever
+ * the task meets the GitHub tools, or a missing write tool reads as a denial.
+ */
+const GITHUB_TASK_WRITE_PATH_NOTE =
+  "These GitHub tools are read-only. For writes (pushes, pull requests, comments, reviews, labels, workflow dispatches, and other GitHub actions), use `git` and `gh` in this checkout: they carry this task's GitHub credentials and are its authorized write path, not a workaround.";
+
 const ROOMOTE_ON_DEMAND_MCP_CATALOG_PATH_ENV_VAR =
   'ROOMOTE_ON_DEMAND_MCP_CATALOG_PATH';
 
@@ -782,6 +790,9 @@ function writeOnDemandMcpCatalog(
       ...(integration?.description
         ? { description: integration.description }
         : {}),
+      ...(mcpServer.name === 'github'
+        ? { note: GITHUB_TASK_WRITE_PATH_NOTE }
+        : {}),
       url: mcpServer.url,
       ...(mcpServer.headers
         ? {
@@ -842,7 +853,7 @@ export function createIntegrationMcpInstructions(
 
     if (mcpServer.name === 'github') {
       return [
-        '# GitHub reads\n\nDiscover GitHub tools through roomote_find_integration_tools with integrationId github. An eligible deployment GitHub App installation with an active connected repository is required. Public github.com repositories do not themselves need to be connected. Use the existing native tools and their discovered schemas for source reads, code search, issues, and pull requests. Searches can span the connected repositories; add a repo:owner/name or org: qualifier when the scope is known. Private reads retain connected-repository authorization. Respect upstream pagination and search-index limits; disclose incomplete results. Never retry an authorization denial anonymously. This task MCP path is read-only; use the authorized coding-task source-control workflow for writes.',
+        `# GitHub reads\n\nDiscover GitHub tools through roomote_find_integration_tools with integrationId github. An eligible deployment GitHub App installation with an active connected repository is required. Public github.com repositories do not themselves need to be connected. Use the existing native tools and their discovered schemas for source reads, code search, issues, and pull requests. Searches can span the connected repositories; add a repo:owner/name or org: qualifier when the scope is known. Private reads retain connected-repository authorization. Respect upstream pagination and search-index limits; disclose incomplete results. Never retry an authorization denial anonymously. ${GITHUB_TASK_WRITE_PATH_NOTE}`,
       ];
     }
     if (isMemoryMcpServer(mcpServer.name)) {

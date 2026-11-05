@@ -32,6 +32,8 @@ const onDemandMcpServerSchema = z.object({
   name: z.string().min(1),
   displayName: z.string().min(1),
   description: z.string().optional(),
+  /** Returned with every lookup that covers this integration. */
+  note: z.string().optional(),
   url: z.string().url(),
   headers: z.record(z.string(), z.string()).optional(),
 });
@@ -190,10 +192,16 @@ export async function findOnDemandIntegrationTools(
       ),
     );
   }
+  const integrationNotes = Object.fromEntries(
+    scoped.flatMap((server) =>
+      server.note ? [[server.name, server.note] as const] : [],
+    ),
+  );
   return jsonResult({
     success: true,
     tools,
     availableToolCount,
+    ...(Object.keys(integrationNotes).length > 0 ? { integrationNotes } : {}),
     ...(emptyReason ? { emptyReason } : {}),
     ...(truncated
       ? { guidance: INTEGRATION_TOOL_LOOKUP_TRUNCATED_GUIDANCE }

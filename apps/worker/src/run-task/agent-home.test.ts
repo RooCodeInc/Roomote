@@ -1776,6 +1776,7 @@ describe('generateOpenCodeConfig provider support', () => {
         {
           name: 'github',
           displayName: 'github',
+          note: expect.stringContaining('use `git` and `gh` in this checkout'),
           url: 'https://api.example.com/api/mcp-routing/github',
           headers: { Authorization: 'Bearer run-token' },
         },
@@ -1851,7 +1852,7 @@ describe('generateOpenCodeConfig provider support', () => {
       'An eligible deployment GitHub App installation with an active connected repository is required',
     );
     expect(integrationInstructions).toContain(
-      'This task MCP path is read-only',
+      'use `git` and `gh` in this checkout',
     );
     expect(integrationInstructions).not.toContain('gist');
   });
