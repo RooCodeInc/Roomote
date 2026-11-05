@@ -1,7 +1,6 @@
-import type { Context, Next } from 'hono';
 import { getRoomoteMcpResourceUrl } from '@roomote/auth';
 import { Env } from '@roomote/env';
-import { revokeMcpOAuthGrants } from '@roomote/redis';
+import { isMcpOAuthGrantLive, revokeMcpOAuthGrants } from '@roomote/redis';
 import { oauthGrantFixture } from './oauth-fixture';
 import {
   automations,
@@ -30,14 +29,26 @@ const state = vi.hoisted(() => ({
   credentials: new Map<string, Variables['authContext']>(),
   object: vi.fn(),
 }));
-vi.mock('../../../middleware', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../../middleware')>()),
-  tokenAuthMiddleware:
-    () => async (c: Context<{ Variables: Variables }>, next: Next) => {
-      const auth = state.credentials.get(c.req.header('authorization') ?? '');
-      if (auth) c.set('authContext', auth);
-      await next();
-    },
+vi.mock('@roomote/redis', async (original) => {
+  const actual = await original<typeof import('@roomote/redis')>();
+  return { ...actual, isMcpOAuthGrantLive: vi.fn(actual.isMcpOAuthGrantLive) };
+});
+vi.mock('@roomote/auth', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/auth')>()),
+  ...Object.fromEntries(
+    [
+      ['validateRunToken', 'run'],
+      ['validateMcpAccessToken', 'mcp'],
+      ['validateAuthToken', 'auth'],
+    ].map(([name, kind]) => [
+      name,
+      vi.fn(async (token: string) => {
+        const auth = state.credentials.get(`Bearer ${token}`);
+        if (auth?.tokenType === kind) return auth;
+        throw new Error('Invalid fixture credential');
+      }),
+    ]),
+  ),
 }));
 vi.mock('../../artifacts/storage', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../artifacts/storage')>()),
@@ -224,17 +235,20 @@ it('rejects previously issued download access immediately after its Redis grant 
   );
   const url = new URL(issued.data.url);
   const path = `${url.pathname}${url.search}`;
+  vi.mocked(isMcpOAuthGrantLive).mockClear();
   expect(
     (await createApiApp().request(path, { headers: { authorization } })).status,
   ).toBe(200);
+  expect(isMcpOAuthGrantLive).toHaveBeenCalledOnce();
   await revokeMcpOAuthGrants(owner.id);
-  // Keep the injected verified auth context: live Redis revocation, rather than
-  // removing a token from the test's authentication map, must reject the GET.
+  // Keep the signed-credential fixture: live Redis revocation must reject GET.
   expect(state.credentials.has(authorization)).toBe(true);
   state.object.mockClear();
+  vi.mocked(isMcpOAuthGrantLive).mockClear();
   expect(
     (await createApiApp().request(path, { headers: { authorization } })).status,
   ).toBe(401);
+  expect(isMcpOAuthGrantLive).toHaveBeenCalledOnce();
   expect(state.object).not.toHaveBeenCalled();
 });
 
