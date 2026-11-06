@@ -24,7 +24,7 @@ import {
   formatErrorForLog,
   AGENT_SAFETY,
   AGENT_SAFETY_STOP_TEXT,
-  AgentSafetyPass,
+  AgentSafetyLifecycle,
   isAgentSafetyStop,
   buildInferenceGatewayUrl,
   type AgentSafetyReason,
@@ -1878,33 +1878,27 @@ async function runNonTaskSdkPrompt(
     await options.onSessionReady?.(sessionId);
 
     const trackedSessionIds = new Set([sessionId]);
-    const safetyPasses = new Map<string, AgentSafetyPass>();
-    const safetyPass = (id: string) => {
-      let pass = safetyPasses.get(id);
-      if (!pass) {
-        pass = new AgentSafetyPass((value) =>
-          createHash('sha256').update(value).digest('hex'),
-        );
-        safetyPasses.set(id, pass);
-      }
-      return pass;
-    };
-    safetyPass(sessionId);
-    let safetyStopped = false;
+    const safety = new AgentSafetyLifecycle({
+      digest: (value) => createHash('sha256').update(value).digest('hex'),
+      isBounded: () => true,
+      // Native sessions can continue a child without a worker task-tool spawn.
+      resumeOnActivity: true,
+      onDeadline: (id) => {
+        void safetyStop('pass_time_limit', id).catch(() => undefined);
+      },
+    });
+    safety.start(sessionId);
     const safetyStop = async (
       reason: AgentSafetyReason,
       stoppedSessionId = sessionId,
     ) => {
-      if (safetyStopped) return;
-      safetyStopped = true;
+      const details = safety.claimStop(stoppedSessionId);
+      if (!details) return;
       safetyPersistence = params.taskId
         ? stopTaskForAgentSafety({
             taskId: params.taskId,
             reason,
-            details: {
-              sessionId: stoppedSessionId,
-              ...safetyPasses.get(stoppedSessionId)?.snapshot(),
-            },
+            details,
           })
         : Promise.resolve();
       // Reject and abort locally immediately, then persist the durable latch.
@@ -1913,15 +1907,6 @@ async function runNonTaskSdkPrompt(
       abortController.abort(error);
       await safetyPersistence;
     };
-    const safetyTimer = setInterval(() => {
-      for (const [id, pass] of safetyPasses) {
-        if (pass.checkTime()) {
-          void safetyStop('pass_time_limit', id).catch(() => undefined);
-          break;
-        }
-      }
-    }, 1_000);
-    safetyTimer.unref();
     const sessionsCreatedThisTurn = new Set<string>();
     const usageRecordings = new Map<string, Promise<void>>();
     const observedUsageEventKeys = new Set<string>();
@@ -2067,7 +2052,7 @@ async function runNonTaskSdkPrompt(
               const childId =
                 event.properties.info.id ?? event.properties.sessionID;
               trackedSessionIds.add(childId);
-              safetyPass(childId);
+              safety.start(childId, true);
               if (event.type === 'session.created') {
                 sessionsCreatedThisTurn.add(event.properties.sessionID);
               }
@@ -2083,7 +2068,7 @@ async function runNonTaskSdkPrompt(
               event.type === 'session.idle' &&
               event.properties.sessionID !== sessionId
             ) {
-              safetyPasses.delete(event.properties.sessionID);
+              safety.settle(event.properties.sessionID);
             } else if (event.type === 'message.part.updated') {
               const part = event.properties.part;
               if (
@@ -2091,22 +2076,7 @@ async function runNonTaskSdkPrompt(
                 trackedSessionIds.has(part.sessionID) &&
                 ['completed', 'error'].includes(part.state.status)
               ) {
-                const state = part.state as {
-                  status: string;
-                  input?: unknown;
-                  output?: unknown;
-                  error?: unknown;
-                };
-                const reason = safetyPass(part.sessionID).completed({
-                  id: part.callID,
-                  name: part.tool,
-                  args: state.input,
-                  result: {
-                    status: state.status,
-                    output: state.output,
-                    error: state.error,
-                  },
-                });
+                const reason = safety.observe(part.sessionID, event);
                 if (reason) {
                   await safetyStop(reason, part.sessionID);
                   return;
@@ -2160,7 +2130,7 @@ async function runNonTaskSdkPrompt(
                 await safetyStop('task_request_limit');
                 return;
               }
-              const reason = safetyPass(info.sessionID).step(info.id);
+              const reason = safety.observe(info.sessionID, event);
               if (reason) {
                 await safetyStop(reason, info.sessionID);
                 return;
@@ -2530,7 +2500,7 @@ async function runNonTaskSdkPrompt(
       }
       throw error;
     } finally {
-      clearInterval(safetyTimer);
+      safety.dispose();
       abortController.signal.removeEventListener('abort', abortEventMonitor);
       eventAbortController.abort();
       void eventMonitor?.catch(() => undefined);

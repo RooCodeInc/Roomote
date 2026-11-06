@@ -8,8 +8,7 @@ import { spawnSync } from 'node:child_process';
 import {
   asBoolean,
   AGENT_SAFETY_STOP_TEXT,
-  AgentSafetyPass,
-  AGENT_SAFETY,
+  AgentSafetyLifecycle,
   isAgentSafetyStop,
   type AgentSafetyReason,
   type AgentSafetyStopDetails,
@@ -1650,13 +1649,12 @@ export class OpenCodeServerHarness
   implements Harness
 {
   private readonly client: OpenCodeServerClient;
-  private readonly safetyPasses = new Map<string, AgentSafetyPass>();
+  private readonly safety: AgentSafetyLifecycle;
   private readonly onSafetyStop: OpenCodeServerHarnessOptions['onSafetyStop'];
-  private readonly safetyTimer: ReturnType<typeof setInterval>;
-  private safetyStopped = false;
+  private get safetyStopped(): boolean {
+    return this.safety.stopped;
+  }
   private readonly safetyStoppedSessionIds = new Set<string>();
-  private readonly settledSafetySessions = new Set<string>();
-  private readonly settledSubagentWatchdogKeys = new Set<string>();
   private readonly workspacePath: string;
   private readonly normalizedWorkspacePath: string;
   private readonly logger: OpenCodeServerHarnessOptions['logger'];
@@ -1854,24 +1852,14 @@ export class OpenCodeServerHarness
     this.fallbackRole = options.fallbackRole;
     this.agentFallbacks = options.agentFallbacks ?? {};
     this.onSafetyStop = options.onSafetyStop;
-    this.safetyTimer = setInterval(() => {
-      for (const watchdog of this.activeSubagentWatchdogs.values()) {
-        if (Date.now() - watchdog.startedAtMs >= AGENT_SAFETY.passTimeoutMs) {
-          void this.stopForSafety(
-            'pass_time_limit',
-            watchdog.childSessionId ?? watchdog.sessionId,
-          );
-          return;
-        }
-      }
-      for (const [id, pass] of this.safetyPasses) {
-        if (id !== this.sessionId && pass.checkTime()) {
-          void this.stopForSafety('pass_time_limit', id);
-          break;
-        }
-      }
-    }, 1_000);
-    this.safetyTimer.unref?.();
+    this.safety = new AgentSafetyLifecycle({
+      digest: (value) => createHash('sha256').update(value).digest('hex'),
+      isBounded: (id) => id !== this.sessionId,
+      includeFailedTools: true,
+      onDeadline: (id) => {
+        void this.stopForSafety('pass_time_limit', id);
+      },
+    });
     this.commandEnv = options.commandEnv
       ? { ...options.commandEnv }
       : undefined;
@@ -2098,8 +2086,7 @@ export class OpenCodeServerHarness
   }
 
   dispose(): void {
-    clearInterval(this.safetyTimer);
-    this.safetyPasses.clear();
+    this.safety.dispose();
     this.disposed = true;
     this.connected = false;
     this.clearReplayAbortErrorSuppression();
@@ -2758,10 +2745,10 @@ export class OpenCodeServerHarness
       updatePayload: Record<string, unknown>;
     },
   ): void {
-    if (this.settledSubagentWatchdogKeys.has(eventKey)) return;
-    if (input.childSessionId)
-      this.settledSafetySessions.delete(input.childSessionId);
-    if (input.childSessionId) this.safetyPass(input.childSessionId);
+    if (
+      !this.safety.startSpawn(eventKey, input.sessionId, input.childSessionId)
+    )
+      return;
     const existing = this.activeSubagentWatchdogs.get(eventKey);
 
     if (existing) {
@@ -2895,7 +2882,7 @@ export class OpenCodeServerHarness
   }
 
   private stopSubagentWatchdog(eventKey: string): void {
-    this.settledSubagentWatchdogKeys.add(eventKey);
+    this.safety.settleSpawn(eventKey);
     const watchdog = this.activeSubagentWatchdogs.get(eventKey);
 
     if (!watchdog) {
@@ -2907,8 +2894,6 @@ export class OpenCodeServerHarness
     }
     this.clearSubagentActivityFlush(watchdog);
     if (watchdog.childSessionId) {
-      this.settledSafetySessions.add(watchdog.childSessionId);
-      this.safetyPasses.delete(watchdog.childSessionId);
       this.childSessionWatchdogKeys.delete(watchdog.childSessionId);
       this.linkedChildSessions.delete(watchdog.childSessionId);
     }
@@ -2937,18 +2922,7 @@ export class OpenCodeServerHarness
         continue;
       }
 
-      if (watchdog.settlementTimer) {
-        clearTimeout(watchdog.settlementTimer);
-      }
-      this.clearSubagentActivityFlush(watchdog);
-      this.settledSubagentWatchdogKeys.add(eventKey);
-      this.activeSubagentWatchdogs.delete(eventKey);
-      if (watchdog.childSessionId) {
-        this.settledSafetySessions.add(watchdog.childSessionId);
-        this.safetyPasses.delete(watchdog.childSessionId);
-        this.childSessionWatchdogKeys.delete(watchdog.childSessionId);
-        this.linkedChildSessions.delete(watchdog.childSessionId);
-      }
+      this.stopSubagentWatchdog(eventKey);
     }
   }
 
@@ -4144,11 +4118,7 @@ export class OpenCodeServerHarness
           parentSessionId: parentId,
           agentType: this.linkedChildSessions.get(childId)?.agentType ?? null,
         });
-        if (
-          payload.type === 'session.created' &&
-          !this.settledSafetySessions.has(childId)
-        )
-          this.safetyPass(childId);
+        if (payload.type === 'session.created') this.safety.start(childId);
       }
     }
 
@@ -4173,46 +4143,7 @@ export class OpenCodeServerHarness
         await this.stopForSafety('task_request_limit', sessionId);
         return;
       }
-      const pass =
-        this.safetyPasses.get(sessionId) ??
-        (!this.settledSafetySessions.has(sessionId) &&
-        (['message.part.updated', 'message.updated'].includes(payload.type) ||
-          ['busy', 'retry'].includes(
-            asString(asRecord(properties?.status)?.type) ?? '',
-          ))
-          ? this.safetyPass(sessionId)
-          : undefined);
-      const part = asRecord(properties?.part);
-      let reason: AgentSafetyReason | undefined;
-      if (payload.type === 'message.part.updated' && part?.type === 'tool') {
-        const state = asRecord(part.state);
-        if (
-          ['completed', 'error', 'failed'].includes(
-            asString(state?.status) ?? '',
-          ) &&
-          asString(part.callID)
-        ) {
-          reason = pass?.completed({
-            id: String(part.callID),
-            name: asString(part.tool) ?? '',
-            args: state?.input,
-            result: {
-              status: state?.status,
-              output: state?.output,
-              error: state?.error,
-            },
-          });
-        }
-      }
-      // A model step is an assistant message, not every streaming update.
-      const info = asRecord(properties?.info);
-      if (
-        sessionId !== this.sessionId &&
-        payload.type === 'message.updated' &&
-        info?.role === 'assistant' &&
-        asString(info.id)
-      )
-        reason ??= pass?.step(String(info.id));
+      const reason = this.safety.observe(sessionId, payload);
       if (reason) {
         await this.stopForSafety(reason, sessionId);
         return;
@@ -4222,8 +4153,7 @@ export class OpenCodeServerHarness
         payload.type === 'session.idle' &&
         !this.childSessionWatchdogKeys.has(sessionId)
       ) {
-        this.safetyPasses.delete(sessionId);
-        this.settledSafetySessions.add(sessionId);
+        this.safety.settle(sessionId);
       }
     }
 
@@ -4320,25 +4250,14 @@ export class OpenCodeServerHarness
     }
   }
 
-  private safetyPass(sessionId: string): AgentSafetyPass {
-    let pass = this.safetyPasses.get(sessionId);
-    if (!pass) {
-      pass = new AgentSafetyPass((value) =>
-        createHash('sha256').update(value).digest('hex'),
-      );
-      this.safetyPasses.set(sessionId, pass);
-    }
-    return pass;
-  }
-
   /** Stop the entire tree: a parent cannot retry or replace a safety-stopped pass. */
   private async stopForSafety(
     reason: AgentSafetyReason,
     stoppedSessionId: string,
   ): Promise<void> {
-    if (this.safetyStopped || this.disposed) return;
-    this.safetyStopped = true;
-    clearInterval(this.safetyTimer);
+    if (this.disposed) return;
+    const details = this.safety.claimStop(stoppedSessionId);
+    if (!details) return;
     const sessionId = this.sessionId;
     const ids = new Set([
       stoppedSessionId,
@@ -4346,10 +4265,6 @@ export class OpenCodeServerHarness
       ...(sessionId ? [sessionId] : []),
     ]);
     for (const id of ids) this.safetyStoppedSessionIds.add(id);
-    const details = {
-      sessionId: stoppedSessionId,
-      ...this.safetyPasses.get(stoppedSessionId)?.snapshot(),
-    };
     this.prompts.clear();
     this.clearQueuedPromptRetryTimer();
     this.clearProviderErrorRecoveryState();
@@ -5981,7 +5896,7 @@ export class OpenCodeServerHarness
       }
 
       if (this.safetyStopped) return;
-      this.safetyPasses.delete(sessionId);
+      this.safety.finishRoot(sessionId);
       this.runtimeEvents.taskCompleted(sessionId, finalized?.tokenUsage, {
         ...(missingChatCloseoutReminderCount !== null
           ? {
