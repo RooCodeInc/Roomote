@@ -217,6 +217,10 @@ describe('snapshotJob', () => {
   });
 
   it('records durable started/completed events when a snapshot succeeds', async () => {
+    mockFindFirst.mockResolvedValue({
+      ...baseTaskRun,
+      machineId: 'sb-success',
+    });
     mockGetInstanceStatus.mockResolvedValue({ status: 'running' });
     mockCreateSnapshot.mockResolvedValue({
       snapshotId: 'snap_success_1',
@@ -346,6 +350,7 @@ describe('snapshotJob', () => {
   it('requests a sandbox-server scrub before creating the snapshot', async () => {
     mockFindFirst.mockResolvedValue({
       ...baseTaskRun,
+      machineId: 'sb-scrub',
       sandboxServerUrl: 'https://sandbox.example.test',
     });
     mockGetInstanceStatus.mockResolvedValue({ status: 'running' });
@@ -395,6 +400,7 @@ describe('snapshotJob', () => {
   it('continues the snapshot when the sandbox-server scrub is unavailable', async () => {
     mockFindFirst.mockResolvedValue({
       ...baseTaskRun,
+      machineId: 'sb-scrub-down',
       sandboxServerUrl: 'https://sandbox.example.test',
     });
     mockGetInstanceStatus.mockResolvedValue({ status: 'running' });
@@ -432,6 +438,7 @@ describe('snapshotJob', () => {
   });
 
   it('skips the scrub request when the run has no sandbox server URL', async () => {
+    mockFindFirst.mockResolvedValue({ ...baseTaskRun, machineId: 'sb-no-url' });
     mockGetInstanceStatus.mockResolvedValue({ status: 'running' });
     mockCreateSnapshot.mockResolvedValue({ snapshotId: 'snap_no_url' });
 
@@ -458,6 +465,7 @@ describe('snapshotJob', () => {
   it('marks the linked task completed when requested by completion-on-snapshot metadata', async () => {
     mockFindFirst.mockResolvedValue({
       ...baseTaskRun,
+      machineId: 'sb-mark-done',
       payloadKind: TaskPayloadKind.StandardTask,
       payload: withCompleteTaskOnSnapshot({
         repo: 'acme/task-repo',
@@ -482,6 +490,10 @@ describe('snapshotJob', () => {
   });
 
   it('does not reattach a snapshot when the snapshot attachment is stale', async () => {
+    mockFindFirst.mockResolvedValue({
+      ...baseTaskRun,
+      machineId: 'sb-stale-after-edit',
+    });
     mockGetInstanceStatus.mockResolvedValue({ status: 'running' });
     mockCreateSnapshot.mockResolvedValue({
       snapshotId: 'snap_stale_after_edit',
@@ -530,6 +542,7 @@ describe('snapshotJob', () => {
     };
     mockFindFirst.mockResolvedValue({
       ...baseTaskRun,
+      machineId: 'sb-claim-owned',
       payload: {
         environmentId: 'env-1',
         environmentSnapshotAttachment: attachmentSource,
@@ -556,6 +569,10 @@ describe('snapshotJob', () => {
   });
 
   it('records a durable failure event when the sandbox is already stopped', async () => {
+    mockFindFirst.mockResolvedValue({
+      ...baseTaskRun,
+      machineId: 'sb-stopped',
+    });
     mockGetInstanceStatus.mockResolvedValue({ status: 'stopped' });
 
     await expect(
@@ -717,7 +734,7 @@ describe('snapshotJob', () => {
     expect(mockFinishRun).not.toHaveBeenCalled();
   });
 
-  it('leaves a run that moved to a different sandbox alone after a terminal snapshot failure', async () => {
+  it('leaves a run that moved to a different sandbox alone before contacting the provider', async () => {
     mockFindFirst.mockResolvedValue({
       ...baseTaskRun,
       status: RunStatus.Running,
@@ -729,9 +746,10 @@ describe('snapshotJob', () => {
       snapshotJob({
         data: { runId: 123, sandboxId: 'sb-stopped' },
       } as never),
-    ).rejects.toThrow('Instance is not running');
+    ).resolves.toBeUndefined();
 
     expect(mockFinishRun).not.toHaveBeenCalled();
+    expect(mockGetInstanceStatus).not.toHaveBeenCalled();
   });
 
   it('does not finalize the run while snapshot retries remain', async () => {
@@ -819,6 +837,10 @@ describe('snapshotJob', () => {
   });
 
   it('guards the failure update when createSnapshot throws after the job started', async () => {
+    mockFindFirst.mockResolvedValue({
+      ...baseTaskRun,
+      machineId: 'sb-running',
+    });
     mockGetInstanceStatus.mockResolvedValue({ status: 'running' });
     mockCreateSnapshot.mockRejectedValue(
       Object.assign(new Error('Status code 422 is not ok'), {
@@ -936,6 +958,10 @@ describe('snapshotJob', () => {
   });
 
   it('retries createSnapshot failures without marking snapshotFailedAt before a later success', async () => {
+    mockFindFirst.mockResolvedValue({
+      ...baseTaskRun,
+      machineId: 'sb-retry-success',
+    });
     mockGetInstanceStatus.mockResolvedValue({ status: 'running' });
     mockCreateSnapshot
       .mockRejectedValueOnce(
@@ -1010,6 +1036,10 @@ describe('snapshotJob', () => {
   });
 
   it('marks snapshotFailedAt only on the final failed attempt', async () => {
+    mockFindFirst.mockResolvedValue({
+      ...baseTaskRun,
+      machineId: 'sb-final-failure',
+    });
     mockGetInstanceStatus.mockResolvedValue({ status: 'running' });
     mockCreateSnapshot.mockRejectedValue(
       new Error(
@@ -1063,6 +1093,7 @@ describe('snapshotJob', () => {
   it('retries modal snapshot RPC deadline failures even when the message is not a plain timeout string', async () => {
     mockFindFirst.mockResolvedValue({
       ...baseTaskRun,
+      machineId: 'sb-modal-retry',
       vendor: 'modal',
     });
     mockGetInstanceStatus.mockResolvedValue({ status: 'running' });
@@ -1118,6 +1149,7 @@ describe('snapshotJob', () => {
   it('records modal RPC timeout details on the final failed attempt', async () => {
     mockFindFirst.mockResolvedValue({
       ...baseTaskRun,
+      machineId: 'sb-modal-final-failure',
       vendor: 'modal',
     });
     mockGetInstanceStatus.mockResolvedValue({ status: 'running' });
@@ -1176,6 +1208,7 @@ describe('snapshotJob', () => {
   it('asks the sandbox to restore credentials when a terminal failure leaves it running', async () => {
     mockFindFirst.mockResolvedValue({
       ...baseTaskRun,
+      machineId: 'sb-restore',
       sandboxServerUrl: 'https://sandbox.example.test',
     });
     mockGetInstanceStatus.mockResolvedValue({ status: 'running' });
@@ -1215,6 +1248,7 @@ describe('snapshotJob', () => {
   it('records an unavailable credential restore without changing the failure outcome', async () => {
     mockFindFirst.mockResolvedValue({
       ...baseTaskRun,
+      machineId: 'sb-restore-down',
       sandboxServerUrl: 'https://sandbox.example.test',
     });
     mockGetInstanceStatus.mockResolvedValue({ status: 'running' });
@@ -1255,6 +1289,10 @@ describe('snapshotJob', () => {
   });
 
   it('does not request a credential restore when the run has no sandbox server URL', async () => {
+    mockFindFirst.mockResolvedValue({
+      ...baseTaskRun,
+      machineId: 'sb-restore-no-url',
+    });
     mockGetInstanceStatus.mockResolvedValue({ status: 'running' });
     mockCreateSnapshot.mockRejectedValue(new Error('permanent failure'));
 
@@ -1271,6 +1309,10 @@ describe('snapshotJob', () => {
   });
 
   it('does not retry permanent createSnapshot failures when attempts remain', async () => {
+    mockFindFirst.mockResolvedValue({
+      ...baseTaskRun,
+      machineId: 'sb-permanent-failure',
+    });
     mockGetInstanceStatus.mockResolvedValue({ status: 'running' });
     mockCreateSnapshot.mockRejectedValue(
       Object.assign(new Error('Status code 422 is not ok'), {
@@ -1362,6 +1404,7 @@ describe('snapshotJob', () => {
   it('reconciles a finished Vercel snapshot when a retry sees the sandbox already stopped', async () => {
     mockFindFirst.mockResolvedValue({
       ...baseTaskRun,
+      machineId: 'sb-reconcile-after-retry',
       snapshotRequestedAt: new Date('2026-04-24T06:34:00.000Z'),
     });
     mockGetInstanceStatus.mockResolvedValue({ status: 'stopped' });
@@ -1418,6 +1461,10 @@ describe('snapshotJob', () => {
   });
 
   it('keeps non-provider metadata when responseJson has a different shape', async () => {
+    mockFindFirst.mockResolvedValue({
+      ...baseTaskRun,
+      machineId: 'sb-shape-mismatch',
+    });
     mockGetInstanceStatus.mockResolvedValue({ status: 'running' });
     mockCreateSnapshot.mockRejectedValue(
       Object.assign(new Error('Status code 422 is not ok'), {
@@ -1468,6 +1515,10 @@ describe('snapshotJob', () => {
   });
 
   it('reconciles a Vercel sandbox_snapshotting failure by source sandbox id', async () => {
+    mockFindFirst.mockResolvedValue({
+      ...baseTaskRun,
+      machineId: 'sb-reconcile',
+    });
     mockGetInstanceStatus.mockResolvedValue({ status: 'running' });
     mockCreateSnapshot.mockRejectedValue(
       Object.assign(new Error('Status code 422 is not ok'), {
@@ -1592,6 +1643,10 @@ describe('snapshotJob', () => {
   });
 
   it('persists the snapshot id before the adapter tears the sandbox down', async () => {
+    mockFindFirst.mockResolvedValue({
+      ...baseTaskRun,
+      machineId: 'sb-early-persist',
+    });
     const persistOrder: string[] = [];
 
     mockGetInstanceStatus.mockResolvedValue({ status: 'running' });
@@ -1638,6 +1693,7 @@ describe('snapshotJob', () => {
     const snapshotCreatedAt = new Date('2026-04-24T06:30:00.000Z');
     mockFindFirst.mockResolvedValue({
       ...baseTaskRun,
+      machineId: 'sb-redelivered',
       snapshotId: 'snap_persisted_early',
       snapshotCreatedAt,
     });
@@ -1692,10 +1748,12 @@ describe('snapshotJob', () => {
         returning: () => Promise.resolve([]),
       }),
     );
-    mockFindFirst.mockResolvedValueOnce(baseTaskRun).mockResolvedValueOnce({
-      snapshotId: 'snap_winner',
-      snapshotCreatedAt: winnerCreatedAt,
-    });
+    mockFindFirst
+      .mockResolvedValueOnce({ ...baseTaskRun, machineId: 'sb-race' })
+      .mockResolvedValueOnce({
+        snapshotId: 'snap_winner',
+        snapshotCreatedAt: winnerCreatedAt,
+      });
     mockCreateSnapshot.mockImplementation(async ({ onSnapshotCreated }) => {
       await onSnapshotCreated?.('snap_loser');
       return { snapshotId: 'snap_loser' };
