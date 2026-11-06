@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { createServer, type ServerResponse } from 'node:http';
 
 import { buildWorkerHeaders, createWorkerFetchWithRetry } from './index';
 
@@ -71,6 +72,115 @@ describe('buildWorkerHeaders', () => {
 });
 
 describe('createWorkerFetchWithRetry', () => {
+  async function withStreamingFailures(
+    failures: number,
+    check: (
+      url: string,
+      active: Set<ServerResponse>,
+      requests: () => number,
+    ) => Promise<void>,
+  ) {
+    const active = new Set<ServerResponse>();
+    let requests = 0;
+    const server = createServer((_request, response) => {
+      requests += 1;
+      if (requests <= failures) {
+        active.add(response);
+        response.on('close', () => active.delete(response));
+        response.writeHead(503, { 'content-type': 'text/html' });
+        response.write('Temporary upstream failure');
+        return;
+      }
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end('{"restored":true}');
+    });
+    await new Promise<void>((resolve) =>
+      server.listen(0, '127.0.0.1', resolve),
+    );
+    try {
+      const address = server.address();
+      if (!address || typeof address === 'string')
+        throw new Error('Missing test listener');
+      await check(
+        `http://127.0.0.1:${address.port}/trpc/`,
+        active,
+        () => requests,
+      );
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
+  }
+
+  it('closes discarded HTTP error streams while restoring the actual query response', async () => {
+    await withStreamingFailures(2, async (url, active, requests) => {
+      const workerFetch = createWorkerFetchWithRetry(fetch, {
+        maxAttempts: 3,
+        baseDelayMs: 1,
+      });
+      const response = await workerFetch(`${url}taskRuns.findRuntimeStateById`);
+      expect(await response.json()).toEqual({ restored: true });
+      expect(requests()).toBe(3);
+      await vi.waitFor(() => expect(active.size).toBe(0));
+    });
+  });
+
+  it.each(['GET', 'POST'])(
+    'closes a rejected non-JSON HTTP response without replaying %s',
+    async (method) => {
+      await withStreamingFailures(Infinity, async (url, active, requests) => {
+        const workerFetch = createWorkerFetchWithRetry(fetch, {
+          maxAttempts: method === 'GET' ? 1 : 3,
+        });
+        await expect(
+          workerFetch(`${url}taskRuns.done`, { method }),
+        ).rejects.toThrow('non-JSON content-type');
+        expect(requests()).toBe(1);
+        await vi.waitFor(() => expect(active.size).toBe(0));
+      });
+    },
+  );
+
+  it('retains the final JSON error body for the caller after exhausting retries', async () => {
+    const workerFetch = createWorkerFetchWithRetry(
+      vi.fn<typeof fetch>().mockImplementation(
+        async () =>
+          new Response('{"error":"unavailable"}', {
+            status: 503,
+            headers: { 'content-type': 'application/json' },
+          }),
+      ),
+      { maxAttempts: 2, baseDelayMs: 0 },
+    );
+    const response = await workerFetch('https://api.example.test/trpc');
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: 'unavailable' });
+  });
+
+  it('does not turn a failed body cleanup into an additional request', async () => {
+    const erroredBody = new ReadableStream({
+      start(controller) {
+        controller.error(new Error('body stream failed'));
+      },
+    });
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(erroredBody, { status: 503 }))
+      .mockResolvedValueOnce(
+        new Response('[]', { headers: { 'content-type': 'application/json' } }),
+      );
+    const workerFetch = createWorkerFetchWithRetry(fetchMock, {
+      maxAttempts: 3,
+      baseDelayMs: 0,
+    });
+    expect(
+      await (await workerFetch('https://api.example.test/trpc')).json(),
+    ).toEqual([]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('retries query fetch failures and returns the later success', async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
