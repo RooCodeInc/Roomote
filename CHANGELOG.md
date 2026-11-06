@@ -2,6 +2,20 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.20.2 (2026-11-06)
+
+Roomote 1.20.2 keeps long-running tasks moving, restores resumable work after safety stops, and includes a security update for file-pattern matching.
+
+### Highlights
+
+- Long tasks continue beyond 200 tool calls or 100 model steps.
+- Resume retained work after repetition or time stops while preserving the lifetime request ceiling.
+- Includes a security fix for excessive resource use when processing file-matching patterns.
+
+### Patch changes
+
+- Long tasks are no longer stopped after 200 tool calls or 100 model steps, and replying to a task stopped for repeated activity resumes it from its retained work. The 1,000-request lifetime ceiling and repetition detection still apply.
+
 ## 1.20.1 (2026-11-05)
 
 Roomote 1.20.1 restores reliable Copilot task helpers, keeps Slack history reads useful in busy channels, and clarifies how agents carry out Slack replies and GitHub actions.
