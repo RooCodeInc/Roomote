@@ -47,6 +47,7 @@ import {
   type TaskRun,
   type DatabaseTransaction,
   db,
+  releaseAgentSafetyStopForResume,
   deploymentSettings,
   ensureAutomationRowsOnce,
   ensureSessionForTask,
@@ -3091,6 +3092,9 @@ async function enqueueSnapshotResume(
       if (options.afterCreateInTransaction) {
         await options.afterCreateInTransaction(tx, insertedRun);
       }
+
+      // Resuming continues a pass-level safety stop; the request ceiling holds.
+      await releaseAgentSafetyStopForResume(tx, sourceRun.taskId);
 
       // The new resume run is non-terminal (pending/dequeued), so re-derive the
       // task state: a task that had gone terminal on a prior attempt flips back

@@ -110,11 +110,11 @@ The read-only task-update polling tool has a larger, finite allowance of 20
 identical completions. Shell commands and search tools have no polling exception.
 
 Subagent passes, including review, judge, explore, and custom subagents, also
-stop at 100 model steps, 200 completed tools, or 20 minutes. Activity does not
-extend the deadline. The main task also has repetition and completed-tool
-protection. A task has a lifetime ceiling of 1,000 admitted provider requests,
-shared across its models, children, retries, and resumed runs. Unknown prices
-do not disable that request ceiling.
+stop after 20 minutes. Activity does not extend the deadline. The main task
+also has repetition protection. A task has a lifetime ceiling of 1,000 admitted
+provider requests, shared across its models, children, retries, and resumed
+runs. Unknown prices do not disable that request ceiling. Long tasks are not
+stopped for the number of tool calls or model steps alone.
 
 A safety stop cancels the task's agent tree instead of asking the parent agent
 to retry the stopped pass. A notice is saved in the task and its owning session,
@@ -123,10 +123,11 @@ if a notice has not appeared in an already-open view. Partial work is retained;
 an interrupted review must not be treated as a clean review. An already-admitted
 provider request can still finish and incur cost while cancellation settles.
 
-Automatic retry, model fallback, restart, and resume do not reset a stopped
-task's admission state. Inspect the partial work and the stop reason before
-explicitly starting a new task with a narrower request. There is no automatic
-budget reset or in-product allowance-extension control.
+Automatic retry, model fallback, and restart do not continue a stopped task.
+Resuming the task, for example by replying to it, continues from the retained
+work after a repetition or time stop. The request count is never reset: a task
+that reached the 1,000-request ceiling stays stopped, and continuing that work
+requires a new task. There is no in-product allowance-extension control.
 
 These are request and execution bounds, not a dollar spending limit. Use your
 inference provider's own billing controls for a financial cap; see

@@ -1,4 +1,4 @@
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, isNotNull, isNull, lt, ne, or } from 'drizzle-orm';
 import {
   AGENT_SAFETY_STOP_TEXT,
   ACP_ENVELOPE_EVENT_TYPES,
@@ -81,8 +81,9 @@ async function stopInTransaction(
       .insert(fastAgentMessages)
       .values({
         conversationId: parentConversation.id,
-        eventId: `agent-safety:${taskId}`,
-        turnId: `agent-safety:${taskId}`,
+        // Per run: a resume can release the latch and a later run stop again.
+        eventId: `agent-safety:${taskId}:${run.id}`,
+        turnId: `agent-safety:${taskId}:${run.id}`,
         turnSeq: 0,
         ts,
         eventType: ACP_ENVELOPE_EVENT_TYPES.AgentSafetyStop,
@@ -141,4 +142,31 @@ export async function admitTaskInferenceRequest(
       .where(eq(tasks.id, taskId));
     return true;
   });
+}
+
+/**
+ * A new resume run is an explicit continuation, so it releases a pass-level
+ * safety stop (for example an identical-tool loop). The lifetime request
+ * counter is never reset, and a `task_request_limit` stop stays latched.
+ */
+export async function releaseAgentSafetyStopForResume(
+  tx: Transaction,
+  taskId: string,
+): Promise<boolean> {
+  const released = await tx
+    .update(tasks)
+    .set({ safetyStoppedAt: null, safetyStopReason: null })
+    .where(
+      and(
+        eq(tasks.id, taskId),
+        isNotNull(tasks.safetyStoppedAt),
+        or(
+          isNull(tasks.safetyStopReason),
+          ne(tasks.safetyStopReason, 'task_request_limit'),
+        ),
+        lt(tasks.inferenceRequests, tasks.inferenceRequestLimit),
+      ),
+    )
+    .returning({ id: tasks.id });
+  return released.length > 0;
 }
