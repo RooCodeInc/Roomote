@@ -16,6 +16,14 @@ const redisState = vi.hoisted(() => ({
 }));
 const mcpAuthState = vi.hoisted(() => ({ userId: 'user-123' }));
 
+// Route-policy unit fixtures deliberately stand in for authenticated ingress.
+// Real middleware and Redis enforcement are exercised by the HTTP access suite.
+vi.mock('../middleware/tokenAuthMiddleware', async (original) => ({
+  ...(await original<typeof import('../middleware/tokenAuthMiddleware')>()),
+  getRequestAuth: (c: Context<{ Variables: Variables }>) =>
+    c.get('authContext'),
+}));
+
 vi.mock('@roomote/redis', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@roomote/redis')>();
 

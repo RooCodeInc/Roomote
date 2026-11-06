@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { NullableOptionalsMcpServer } from '@roomote/cloud-agents/mcp-nullable-optionals';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import {
@@ -22,20 +22,15 @@ import {
   CHAT_MESSAGE_CONTEXT_TOOL,
   environmentConfigSchema,
   MCP_INTEGRATIONS,
-  isUserToken,
   PRODUCT_NAME,
 } from '@roomote/types';
 import { Env, getDefaultDocsUrl } from '@roomote/env';
-import {
-  getLegacyRoomoteMcpResourceUrl,
-  getRoomoteMcpResourceUrl,
-  ROOMOTE_MCP_SCOPE,
-} from '@roomote/auth';
 import { z } from 'zod';
 
 import packageJson from '../../../../../package.json';
 
 import type { Variables } from '../../types';
+import { getRequestAuth } from '../../middleware/tokenAuthMiddleware';
 
 import {
   assertTaskRunTokenTargetExists,
@@ -102,13 +97,10 @@ function getConfigRepositories(configValue: unknown): Array<{
 }
 
 async function resolveRoomoteMcpAuth(
-  authContext: Variables['authContext'],
+  c: Context<{ Variables: Variables }>,
   options: { allowLegacyAudience: boolean },
 ): Promise<McpAuthContext> {
-  if (!options.allowLegacyAudience) {
-    const member = await resolveRoomoteMemberAuth(authContext);
-    return { userId: member.userId, tokenType: 'auth' };
-  }
+  const authContext = getRequestAuth(c);
   if (!authContext) {
     throw new McpProxyError(
       401,
@@ -116,13 +108,7 @@ async function resolveRoomoteMcpAuth(
     );
   }
 
-  if (isRunTokenContext(authContext)) {
-    if (!options.allowLegacyAudience) {
-      throw new McpProxyError(
-        403,
-        'Forbidden: member tools require a user-scoped access token',
-      );
-    }
+  if (options.allowLegacyAudience && isRunTokenContext(authContext)) {
     await assertTaskRunTokenTargetExists(authContext);
 
     return {
@@ -132,37 +118,8 @@ async function resolveRoomoteMcpAuth(
     };
   }
 
-  if (isUserToken(authContext)) {
-    return {
-      userId: authContext.userId,
-      tokenType: 'auth',
-    };
-  }
-
-  if (
-    authContext.tokenType === 'mcp' &&
-    [
-      getRoomoteMcpResourceUrl(Env.R_PUBLIC_URL ?? Env.R_APP_URL),
-      ...(options.allowLegacyAudience
-        ? [getLegacyRoomoteMcpResourceUrl(Env.TRPC_URL)]
-        : []),
-    ].includes(authContext.resource) &&
-    authContext.scopes.includes(ROOMOTE_MCP_SCOPE)
-  ) {
-    await resolveRoomoteMemberAuth({
-      ...authContext,
-      resource: getRoomoteMcpResourceUrl(Env.R_PUBLIC_URL ?? Env.R_APP_URL),
-    });
-    return {
-      userId: authContext.userId,
-      tokenType: 'auth',
-    };
-  }
-
-  throw new McpProxyError(
-    403,
-    `${PRODUCT_NAME} MCP requires a user-scoped auth token or task run token`,
-  );
+  const member = await resolveRoomoteMemberAuth(c, options);
+  return { userId: member.userId, tokenType: 'auth' };
 }
 
 async function buildAboutMePayload(options: {
@@ -587,14 +544,14 @@ function createRoomoteMcpRouter(options: {
     const transport = createRoomoteTransport();
 
     try {
-      const rawAuth = c.get('authContext');
+      const rawAuth = getRequestAuth(c);
       if (!rawAuth) {
         throw new McpProxyError(
           401,
           'Unauthorized: missing or invalid bearer token',
         );
       }
-      const auth = await resolveRoomoteMcpAuth(rawAuth, options);
+      const auth = await resolveRoomoteMcpAuth(c, options);
       // Null means the job runs as the deployment service principal; the
       // context tools are informational and support that case. Member tools
       // are only mounted on the public endpoint and retain the resolved user.

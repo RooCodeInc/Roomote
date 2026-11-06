@@ -188,6 +188,23 @@ describe('tokenAuthMiddleware token extraction', () => {
     },
   );
 
+  it('revalidates the same OAuth identity on every new request', async () => {
+    mockValidateMcpAccessToken.mockResolvedValue({
+      tokenType: 'mcp',
+      userId: 'user-1',
+      clientId: 'client',
+      grantId: 'grant',
+    });
+    const app = createApp();
+    const headers = { authorization: 'Bearer oauth' };
+    const first = await app.request('/mcp', { headers });
+    expect((await first.json()).authContext).not.toBeNull();
+    mockGrantLive.mockResolvedValue(false);
+    const second = await app.request('/mcp', { headers });
+    expect((await second.json()).authContext).toBeNull();
+    expect(mockGrantLive).toHaveBeenCalledTimes(2);
+  });
+
   it('accepts the run token from x-api-key on the inference gateway', async () => {
     const authContext = await requestAuthContext(
       '/api/inference/anthropic/v1/messages',
