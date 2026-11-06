@@ -71,6 +71,7 @@ function createDeferred<T>() {
 const {
   mockAuthorizedUser,
   mockSettingsState,
+  mockReadSettings,
   mockCreateInvite,
   mockRevokeInvite,
   mockUpdateUserRole,
@@ -146,6 +147,7 @@ const {
 
     return { revoked: true };
   }),
+  mockReadSettings: vi.fn(async () => mockSettingsState.current),
   mockUpdateUserRole: vi.fn(
     async (_input: { userId: string; role: 'admin' | 'member' }) => ({
       updated: true,
@@ -190,12 +192,23 @@ vi.mock('@/hooks/useTelemetry', () => ({
 
 vi.mock('@/trpc/client', () => ({
   useTRPC: () => ({
+    mcpAuthorizations: {
+      list: {
+        queryKey: () => ['mcp-authorizations'],
+        queryOptions: (input: { userId?: string }) => ({
+          queryKey: ['mcp-authorizations', input],
+          queryFn: async () => [],
+        }),
+      },
+      revoke: { mutationOptions: () => ({ mutationFn: vi.fn() }) },
+      revokeAll: { mutationOptions: () => ({ mutationFn: vi.fn() }) },
+    },
     accessPolicy: {
       get: {
         queryKey: () => ['access-policy'],
         queryOptions: () => ({
           queryKey: ['access-policy'],
-          queryFn: async () => mockSettingsState.current,
+          queryFn: mockReadSettings,
         }),
       },
       accountLinkHelp: {
@@ -266,16 +279,22 @@ function renderUsersSettings() {
     defaultOptions: { queries: { retry: false } },
   });
 
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <UsersSettings />
-    </QueryClientProvider>,
-  );
+  return {
+    queryClient,
+    ...render(
+      <QueryClientProvider client={queryClient}>
+        <UsersSettings />
+      </QueryClientProvider>,
+    ),
+  };
 }
 
 describe('UsersSettings', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockReadSettings
+      .mockReset()
+      .mockImplementation(async () => mockSettingsState.current);
     mockClipboardWriteText.mockResolvedValue(undefined);
     mockAuthorizedUser.current = { userId: 'user-1', cloudEnabled: false };
     mockAccountLinkHelpState.current = { helpText: null };
@@ -287,6 +306,68 @@ describe('UsersSettings', () => {
       users: [],
       license: unlicensedLicense,
     };
+  });
+
+  it('recovers the shared user settings read through a disabled pending Retry', async () => {
+    const read = createDeferred<typeof mockSettingsState.current>();
+    mockReadSettings
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockImplementationOnce(() => read.promise);
+    renderUsersSettings();
+
+    const retry = await screen.findByRole('button', { name: 'Retry' });
+    expect(
+      screen.getByText('Could not load user settings.'),
+    ).toBeInTheDocument();
+    fireEvent.click(retry);
+    await waitFor(() => expect(retry).toBeDisabled());
+    fireEvent.click(retry);
+    expect(mockReadSettings).toHaveBeenCalledTimes(2);
+
+    await act(async () => read.resolve(mockSettingsState.current));
+    expect(await screen.findByLabelText(/Label/)).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Retry' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('keeps cached users, MCP owners and drafts through a background read failure', async () => {
+    mockSettingsState.current.users = [
+      {
+        id: 'user-1',
+        name: 'Local Admin',
+        email: 'admin@example.com',
+        imageUrl: '',
+        role: 'admin',
+        createdAt: new Date('2026-07-02T00:00:00Z'),
+      },
+    ];
+    const { queryClient } = renderUsersSettings();
+    const label = await screen.findByLabelText(/Label/);
+    fireEvent.change(label, { target: { value: 'Keep this invite draft' } });
+    fireEvent.change(screen.getByLabelText('License key'), {
+      target: { value: 'unsaved license draft' },
+    });
+    const owner = screen.getByRole('combobox', {
+      name: 'MCP authorization owner',
+    });
+    mockReadSettings.mockRejectedValueOnce(new Error('offline'));
+    await act(async () => {
+      await queryClient.refetchQueries({ queryKey: ['access-policy'] });
+    });
+
+    expect(queryClient.getQueryState(['access-policy'])?.status).toBe('error');
+    expect(label).toBeInTheDocument();
+    expect(label).toHaveValue('Keep this invite draft');
+    expect(screen.getByLabelText('License key')).toHaveValue(
+      'unsaved license draft',
+    );
+    expect(owner).toBeInTheDocument();
+    expect(
+      screen.queryByText('Could not load user settings.'),
+    ).not.toBeInTheDocument();
+    expect(mockCreateInvite).not.toHaveBeenCalled();
+    expect(mockSetLicenseKey).not.toHaveBeenCalled();
   });
 
   it('saves deployment-specific account linking help', async () => {
