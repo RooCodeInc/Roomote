@@ -48,7 +48,10 @@ const { state, createMock, updateMock, deleteMock, saveManualMock } =
     ),
     updateMock: vi.fn(async (_input: unknown) => ({ success: true })),
     deleteMock: vi.fn(async (_input: unknown) => ({ success: true })),
-    saveManualMock: vi.fn(async (_input: unknown) => ({ success: true })),
+    saveManualMock: vi.fn(
+      async (_input: unknown) =>
+        state.createResult ?? Promise.resolve({ success: true as const }),
+    ),
   }));
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
@@ -358,6 +361,9 @@ it('keeps the submitted catalog invalidation stable while creation is pending', 
   expect(
     within(dialog).getByRole('radio', { name: 'Everywhere' }),
   ).toBeDisabled();
+  for (const label of ['Slug', 'Description', 'Content']) {
+    expect(within(dialog).getByLabelText(label)).toBeDisabled();
+  }
   resolveCreate({ success: true });
 
   await waitFor(() =>
@@ -367,6 +373,83 @@ it('keeps the submitted catalog invalidation stable while creation is pending', 
     queryKey: ['customSkills', 'list'],
   });
 });
+
+it.each(['shared', 'environment'])(
+  'unlocks the retained %s skill draft after a failed save and submits the corrected retry',
+  async (availability) => {
+    state.isAdmin = true;
+    let rejectCreate!: (error: Error) => void;
+    state.createResult = new Promise((_resolve, reject) => {
+      rejectCreate = reject;
+    });
+    renderSkills();
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Add Custom Skill' }),
+    );
+    const dialog = screen.getByRole('dialog');
+    if (availability === 'environment') {
+      const scope = within(dialog).getByRole('radio', {
+        name: 'Only in selected environments',
+      });
+      await waitFor(() => expect(scope).toBeEnabled());
+      fireEvent.click(scope);
+      fireEvent.click(await within(dialog).findByLabelText('Alpha'));
+    }
+    for (const [label, value] of [
+      ['Slug', 'retry-skill'],
+      ['Description', 'Original description'],
+      ['Content', '# Original body'],
+    ]) {
+      fireEvent.change(within(dialog).getByLabelText(label!), {
+        target: { value },
+      });
+    }
+    const mutate = availability === 'shared' ? createMock : saveManualMock;
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save Skill' }));
+    await waitFor(() => expect(mutate).toHaveBeenCalledTimes(1));
+    for (const label of ['Slug', 'Description', 'Content']) {
+      expect(within(dialog).getByLabelText(label)).toBeDisabled();
+    }
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Saving...' }));
+    expect(mutate).toHaveBeenCalledTimes(1);
+    await act(async () => rejectCreate(new Error('Save failed')));
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith('Save failed'),
+    );
+    for (const label of ['Slug', 'Description', 'Content']) {
+      expect(within(dialog).getByLabelText(label)).toBeEnabled();
+    }
+    expect(within(dialog).getByLabelText('Description')).toHaveValue(
+      'Original description',
+    );
+    expect(within(dialog).getByLabelText('Content')).toHaveValue(
+      '# Original body',
+    );
+    if (availability === 'environment') {
+      expect(within(dialog).getByLabelText('Alpha')).toBeChecked();
+    }
+    fireEvent.change(within(dialog).getByLabelText('Description'), {
+      target: { value: 'Corrected description' },
+    });
+    fireEvent.change(within(dialog).getByLabelText('Content'), {
+      target: { value: '# Corrected body' },
+    });
+    state.createResult = null;
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save Skill' }));
+    await waitFor(() => expect(mutate).toHaveBeenCalledTimes(2));
+    expect(mutate.mock.calls[1]?.[0]).toEqual({
+      name: 'retry-skill',
+      description: 'Corrected description',
+      content: '# Corrected body\n',
+      ...(availability === 'environment'
+        ? { environmentIds: ['00000000-0000-4000-8000-000000000011'] }
+        : {}),
+    });
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
+    );
+  },
+);
 
 it('disables environment creation when environments fail to load', async () => {
   state.isAdmin = true;
