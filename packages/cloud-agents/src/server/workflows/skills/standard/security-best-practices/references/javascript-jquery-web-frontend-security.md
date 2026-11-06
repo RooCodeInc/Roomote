@@ -156,7 +156,7 @@ Each rule contains: required practice, insecure patterns, detection hints, and r
 
 Severity: Medium (High if internet-facing app AND version is known-vulnerable)
 
-NOTE: Before performing an upgrade, get concent from the user and try to understand if they have reasons to keep it back. Upgrading can break applications in unexpected ways. Report and recommend upgrades rather than just performing them.
+NOTE: Before performing an upgrade, get consent from the user and try to understand if they have reasons to keep it back. Upgrading can break applications in unexpected ways. Report and recommend upgrades rather than just performing them.
 
 Required:
 
