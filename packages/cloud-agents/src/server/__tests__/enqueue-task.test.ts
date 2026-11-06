@@ -310,6 +310,56 @@ describe('pinned launch providers without an eligible default', () => {
   );
 });
 
+describe('snapshot resume agent safety', () => {
+  it('releases a pass-level safety stop but keeps the lifetime request count', async () => {
+    const userId = await createUser();
+    const run = await launchFresh({
+      task: standardTaskInput({ computeProvider: 'modal' }),
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+    await db
+      .update(tasks)
+      .set({
+        inferenceRequests: 98,
+        safetyStoppedAt: new Date(),
+        safetyStopReason: 'pass_tool_limit',
+      })
+      .where(eq(tasks.id, run.taskId!));
+    await enqueueTask(
+      {
+        task: {
+          type: TaskPayloadKind.SnapshotResume,
+          computeProvider: 'modal',
+          payload: {
+            repo: 'acme/widgets',
+            sourceSnapshotId: 'safety-resume-snapshot',
+            sourceRunId: run.id,
+          },
+        } as SnapshotResumeTask,
+        actingUserId: userId,
+      },
+      { enqueue: false },
+    );
+    expect(
+      await db.query.tasks.findFirst({
+        where: eq(tasks.id, run.taskId!),
+        columns: {
+          inferenceRequests: true,
+          safetyStoppedAt: true,
+          safetyStopReason: true,
+        },
+      }),
+    ).toEqual({
+      inferenceRequests: 98,
+      safetyStoppedAt: null,
+      safetyStopReason: null,
+    });
+  });
+});
+
 describe('shouldCaptureTaskCreatedEvent', () => {
   it('excludes environment snapshot maintenance from task analytics', () => {
     expect(

@@ -1,5 +1,6 @@
 import {
   admitTaskInferenceRequest,
+  releaseAgentSafetyStopForResume,
   stopTaskForAgentSafety,
   db,
   eq,
@@ -103,4 +104,46 @@ it('persists exactly one parent notice and stop latch together, independent of i
   ).toHaveLength(1);
   const restarted = await runFactory.create({ taskId: task.id });
   expect(await admitTaskInferenceRequest(task.id, restarted.id)).toBe(false);
+});
+
+it('releases a pass-level stop for a resume without resetting the request counter', async () => {
+  const { task, run } = await seed();
+  expect(await admitTaskInferenceRequest(task.id, run.id)).toBe(true);
+  await stopTaskForAgentSafety({
+    taskId: task.id,
+    runId: run.id,
+    reason: 'identical_tool_loop',
+  });
+  const resumed = await runFactory.create({ taskId: task.id, kind: 'resume' });
+  expect(
+    await db.transaction((tx) => releaseAgentSafetyStopForResume(tx, task.id)),
+  ).toBe(true);
+  expect(await admitTaskInferenceRequest(task.id, resumed.id)).toBe(true);
+  const row = await db.query.tasks.findFirst({ where: eq(tasks.id, task.id) });
+  expect(row).toMatchObject({
+    inferenceRequests: 2,
+    safetyStoppedAt: null,
+    safetyStopReason: null,
+  });
+  await stopTaskForAgentSafety({
+    taskId: task.id,
+    runId: resumed.id,
+    reason: 'identical_tool_loop',
+  });
+  expect(
+    await db.query.taskMessages.findMany({
+      where: eq(taskMessages.taskId, task.id),
+    }),
+  ).toHaveLength(2);
+});
+
+it('keeps a request-ceiling stop latched across resumes', async () => {
+  const { task, run } = await seed(1);
+  expect(await admitTaskInferenceRequest(task.id, run.id)).toBe(true);
+  expect(await admitTaskInferenceRequest(task.id, run.id)).toBe(false);
+  expect(
+    await db.transaction((tx) => releaseAgentSafetyStopForResume(tx, task.id)),
+  ).toBe(false);
+  const resumed = await runFactory.create({ taskId: task.id, kind: 'resume' });
+  expect(await admitTaskInferenceRequest(task.id, resumed.id)).toBe(false);
 });
