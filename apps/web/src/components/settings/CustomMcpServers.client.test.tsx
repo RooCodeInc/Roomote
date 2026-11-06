@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -30,6 +31,7 @@ type ListedServer = {
 const {
   state,
   createMock,
+  updateMock,
   openKeyDialogMock,
   deleteMock,
   setEnabledMock,
@@ -62,6 +64,9 @@ const {
   openKeyDialogMock: vi.fn(),
   createMock: vi.fn(async (_input: Record<string, unknown>) => ({
     id: 'new-server',
+  })),
+  updateMock: vi.fn(async (_input: Record<string, unknown>) => ({
+    updated: true,
   })),
   deleteMock: vi.fn(async () => ({ deleted: true })),
   setEnabledMock: vi.fn(async () => ({ enabled: false })),
@@ -148,7 +153,7 @@ vi.mock('@/trpc/client', () => ({
       },
       update: {
         mutationOptions: (options = {}) => ({
-          mutationFn: vi.fn(),
+          mutationFn: updateMock,
           ...options,
         }),
       },
@@ -275,6 +280,9 @@ describe('useCustomMcpServers', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    createMock.mockReset().mockResolvedValue({ id: 'new-server' });
+    updateMock.mockReset().mockResolvedValue({ updated: true });
+    setVisibilityMock.mockReset().mockResolvedValue({ visibility: 'owner' });
     toolsRequestMock.mockReset();
     toolsRequestMock.mockImplementation(async () => ({ tools: state.tools }));
     state.availability = { enabled: true };
@@ -288,6 +296,144 @@ describe('useCustomMcpServers', () => {
       expect(screen.getByTestId('enabled')).toHaveTextContent('true');
     });
     expect(screen.queryAllByTestId('item')).toHaveLength(0);
+  });
+
+  it.each(['remote', 'stdio'] as const)(
+    'locks the submitted %s configuration and dismissal until creation finishes',
+    async (transport) => {
+      let finish!: (value: { id: string }) => void;
+      createMock.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      );
+      renderHarness();
+      fireEvent.click(screen.getByTestId('open-add'));
+      const dialog = screen.getByRole('dialog');
+      fireEvent.change(
+        within(dialog).getByPlaceholderText('e.g. internal-tools'),
+        {
+          target: { value: 'pending-server' },
+        },
+      );
+      if (transport === 'stdio') {
+        fireEvent.click(
+          within(dialog).getByRole('radio', { name: 'Local (stdio)' }),
+        );
+      } else {
+        fireEvent.click(within(dialog).getByRole('radio', { name: 'OAuth' }));
+      }
+      fireEvent.click(
+        within(dialog).getByRole('button', { name: 'Add server' }),
+      );
+      await waitFor(() => expect(createMock).toHaveBeenCalledTimes(1));
+      for (const control of within(dialog).getAllByRole('textbox')) {
+        expect(control).toBeDisabled();
+      }
+      for (const control of within(dialog).getAllByRole('radio')) {
+        expect(control).toBeDisabled();
+      }
+      if (transport === 'remote') {
+        expect(within(dialog).getByRole('switch')).toBeDisabled();
+      }
+      expect(
+        within(dialog).getByRole('button', { name: 'Import from JSON' }),
+      ).toBeDisabled();
+      const cancel = within(dialog).getByRole('button', { name: 'Cancel' });
+      expect(cancel).toBeDisabled();
+      fireEvent.click(cancel);
+      fireEvent.keyDown(dialog, { key: 'Escape' });
+      expect(dialog).toBeInTheDocument();
+      expect(
+        within(dialog).queryByRole('button', { name: 'Close' }),
+      ).not.toBeInTheDocument();
+      await act(async () => finish({ id: 'created-server' }));
+      await waitFor(() =>
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
+      );
+      expect(createMock).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('retains and unlocks the edited draft after failure, then saves the corrected retry', async () => {
+    let fail!: (error: Error) => void;
+    updateMock.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          fail = reject;
+        }),
+    );
+    state.servers = [buildServer()];
+    renderHarness();
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Configure internal-tools' }),
+    );
+    const dialog = screen.getByRole('dialog');
+    const url = within(dialog).getByPlaceholderText(
+      'https://mcp.example.com/mcp',
+    );
+    fireEvent.change(url, {
+      target: { value: 'https://mcp.example.com/submitted' },
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(updateMock).toHaveBeenCalledTimes(1));
+    expect(url).toBeDisabled();
+    for (const control of within(dialog).getAllByRole('textbox'))
+      expect(control).toBeDisabled();
+    await act(async () => fail(new Error('Save unavailable')));
+    expect(
+      await within(dialog).findByText('Save unavailable'),
+    ).toBeInTheDocument();
+    expect(url).toBeEnabled();
+    expect(url).toHaveValue('https://mcp.example.com/submitted');
+    expect(
+      within(dialog).getByRole('button', { name: 'Cancel' }),
+    ).toBeEnabled();
+    expect(within(dialog).getByRole('button', { name: 'Close' })).toBeEnabled();
+    fireEvent.change(url, {
+      target: { value: 'https://mcp.example.com/corrected' },
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(updateMock).toHaveBeenCalledTimes(2));
+    expect(updateMock.mock.calls[1]?.[0]).toMatchObject({
+      server: { url: 'https://mcp.example.com/corrected' },
+    });
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
+    );
+  });
+
+  it('keeps the form locked through the visibility write after the configuration update', async () => {
+    let finish!: (value: { visibility: string }) => void;
+    setVisibilityMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    state.servers = [buildServer()];
+    renderHarness();
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Configure internal-tools' }),
+    );
+    const dialog = screen.getByRole('dialog');
+    const owner = within(dialog).getByRole('radio', { name: 'Only me' });
+    fireEvent.click(owner);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(setVisibilityMock).toHaveBeenCalledTimes(1));
+    expect(updateMock).toHaveBeenCalledTimes(1);
+    expect(owner).toBeDisabled();
+    expect(
+      within(dialog).getByPlaceholderText('https://mcp.example.com/mcp'),
+    ).toBeDisabled();
+    expect(
+      within(dialog).getByRole('button', { name: 'Cancel' }),
+    ).toBeDisabled();
+    await act(async () => finish({ visibility: 'owner' }));
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
+    );
   });
 
   it('reports disabled when the operator kill switch is set', async () => {
