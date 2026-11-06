@@ -57,13 +57,15 @@ describe('ScheduleOnlyAutomationContent', () => {
       />,
     );
 
-    expect(screen.getByRole('button', { name: 'Edit' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Edit Schedule' }),
+    ).toBeInTheDocument();
     expect(
       screen.queryByLabelText('Code Quality Auditor schedule'),
     ).not.toBeInTheDocument();
     expect(screen.queryByText(details[0])).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Schedule' }));
     expect(
       screen.getByLabelText('Code Quality Auditor schedule'),
     ).toBeInTheDocument();

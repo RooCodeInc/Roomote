@@ -20,7 +20,9 @@ describe('SettingSummaryRow', () => {
     expect(screen.getByText('Schedule:')).toBeInTheDocument();
     expect(screen.getByText('Daily')).toBeInTheDocument();
     expect(document.querySelector('svg.lucide-calendar')).not.toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    const edit = screen.getByRole('button', { name: 'Edit Schedule' });
+    expect(edit).toHaveTextContent('Edit');
+    fireEvent.click(edit);
     expect(onEdit).toHaveBeenCalledOnce();
   });
 });
