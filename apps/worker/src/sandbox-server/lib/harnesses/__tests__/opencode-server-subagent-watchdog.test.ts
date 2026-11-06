@@ -474,12 +474,12 @@ describe('OpenCode subagent run tracking', () => {
     }
   });
 
-  it('caps unique model steps even without tool calls', async () => {
+  it('does not stop a pass for its number of model steps', async () => {
     const { client, harness } = createHarness();
     try {
       await connectHarness(harness, client);
       await armSpawn(client, harness);
-      for (let index = 0; index < 100; index++) {
+      for (let index = 0; index < 250; index++) {
         await client.emit({
           type: 'message.updated',
           properties: {
@@ -492,9 +492,7 @@ describe('OpenCode subagent run tracking', () => {
           },
         });
       }
-      expect(client.abort).toHaveBeenCalledWith(
-        expect.objectContaining({ sessionId: 'ses_1' }),
-      );
+      expect(client.abort).not.toHaveBeenCalled();
     } finally {
       harness.dispose();
     }

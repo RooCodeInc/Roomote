@@ -3,11 +3,13 @@
 The task row is the durable admission authority. `inference_request_limit`
 defaults to 1,000; `inference_requests` counts admitted attempts, not successful
 responses or accounting events. `safety_stopped_at` and `safety_stop_reason`
-are an irreversible application-level latch for the task. No resume, new run,
-provider fallback, or ordinary message clears these fields. There is no UI or
-public API to grant more allowance in this release; explicit continuation is a
-new task after inspecting the retained work. Operators should not clear a latch
-while an old runtime is alive.
+are the task's stop latch. Provider fallback, in-run retries, and ordinary
+admission never clear it. Creating a snapshot-resume run releases a pass-level
+latch (`releaseAgentSafetyStopForResume`, in the run-creation transaction)
+unless the reason is `task_request_limit` or the counter is already at the
+ceiling; `inference_requests` is never reset. There is no UI or public API to
+grant more allowance; continuing past the ceiling is a new task. Operators
+should not clear a latch while an old runtime is alive.
 
 ## Admission guarantees
 
@@ -49,9 +51,12 @@ updates for the same invocation are ignored. The exact read-only
 `manage_tasks`/`roomote_manage_tasks` action `get_updates` gets 20 identical
 completions; it is not an unlimited polling exception.
 
-Each live child gets its own 100 unique assistant-message starts, 200 unique
-terminal tool completions, and 20-minute wall deadline, independent of progress
-and siblings. A pending task-tool spawn is time-bounded even before its child ID
+Each live child gets its own 20-minute wall deadline, independent of progress
+and siblings. There is no per-pass tool-completion or step cap: legitimate long
+passes routinely exceed any fixed count, and the lifetime request ceiling plus
+repetition detection bound runaway spend. `pass_step_limit` and
+`pass_tool_limit` remain accepted reasons only so older workers can report
+them (N-1). A pending task-tool spawn is time-bounded even before its child ID
 arrives. The worker checks wall deadlines every second. Root tool completions
 are guarded too. Control-plane prompts retain their normal shorter deadlines
 (120 seconds by default); `timeoutMs: null` and larger timeouts cannot disable
@@ -62,7 +67,8 @@ retry/fallback queues, aborts the root and discovered descendants with bounded
 abort requests, emits the terminal task event to release worker/parent waits,
 and refuses late local commands/events. This intentionally does not let the
 parent spawn a replacement pass. The durable task latch refuses all subsequent
-managed provider dispatch even if the worker restarts. The existing parent
+managed provider dispatch even if the worker restarts, until a resume run
+releases a pass-level stop. The existing parent
 settle/error relays do not wake parent inference for a safety-stopped task.
 
 ## Boundaries to keep in mind

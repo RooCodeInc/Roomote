@@ -46,12 +46,10 @@ describe('agent safety pass', () => {
       canonicalSafetyJson({ b: 2, a: 1 }),
     );
   });
-  it('resets repetition on changed results or arguments, but still caps the pass', () => {
+  it('resets repetition on changed results or arguments without a per-pass tool cap', () => {
     const guard = pass();
-    for (let id = 0; id < AGENT_SAFETY.passTools; id++)
-      expect(guard.completed(call(id, { value: id }))).toBe(
-        id === AGENT_SAFETY.passTools - 1 ? 'pass_tool_limit' : undefined,
-      );
+    for (let id = 0; id < 1_000; id++)
+      expect(guard.completed(call(id, { value: id }))).toBeUndefined();
   });
   it('permits bounded status polling, never arbitrary search or shell exemptions', () => {
     const guard = pass();
@@ -65,13 +63,13 @@ describe('agent safety pass', () => {
         }),
       ).toBe(id === 19 ? 'identical_tool_loop' : undefined);
   });
-  it('counts unique model steps and has an activity-independent deadline', () => {
+  it('counts unique model steps without a cap and has an activity-independent deadline', () => {
     const guard = pass();
-    for (let id = 0; id < 100; id++) {
-      const expected = id === 99 ? 'pass_step_limit' : undefined;
-      expect(guard.step(String(id))).toBe(expected);
-      expect(guard.step(String(id))).toBe(expected);
+    for (let id = 0; id < 1_000; id++) {
+      expect(guard.step(String(id))).toBeUndefined();
+      expect(guard.step(String(id))).toBeUndefined();
     }
+    expect(guard.snapshot(0).steps).toBe(1_000);
     expect(pass().checkTime(AGENT_SAFETY.passTimeoutMs)).toBe(
       'pass_time_limit',
     );

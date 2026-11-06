@@ -2,14 +2,13 @@
 export const AGENT_SAFETY = {
   identicalCompletions: 5,
   pollingCompletions: 20,
-  passSteps: 100,
-  passTools: 200,
   passTimeoutMs: 20 * 60_000,
   taskRequests: 1_000,
 } as const;
 
 export type AgentSafetyReason =
   | 'identical_tool_loop'
+  // N-1: no longer raised; kept so older workers can still report them.
   | 'pass_step_limit'
   | 'pass_tool_limit'
   | 'pass_time_limit'
@@ -89,8 +88,6 @@ export class AgentSafetyPass {
   step(id: string): AgentSafetyReason | undefined {
     if (this.stopped) return this.stopped;
     this.steps.add(id);
-    if (this.steps.size >= AGENT_SAFETY.passSteps)
-      this.stopped ??= 'pass_step_limit';
     return this.stopped;
   }
 
@@ -122,8 +119,6 @@ export class AgentSafetyPass {
         : AGENT_SAFETY.identicalCompletions)
     )
       this.stopped = 'identical_tool_loop';
-    if (this.completedCalls.size >= AGENT_SAFETY.passTools)
-      this.stopped ??= 'pass_tool_limit';
     return this.stopped;
   }
 }
