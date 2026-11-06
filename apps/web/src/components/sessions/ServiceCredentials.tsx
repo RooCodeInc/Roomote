@@ -29,10 +29,10 @@ import {
 
 export function ServiceCredentials({ sessionId }: { sessionId: string }) {
   const [open, setOpen] = useState(false);
-  const [integrationName, setIntegrationName] = useState('integration');
+  const [integrationName, setIntegrationName] = useState('');
   function handleOpenChange(nextOpen: boolean) {
     setOpen(nextOpen);
-    if (!nextOpen) setIntegrationName('integration');
+    if (!nextOpen) setIntegrationName('');
     if (!nextOpen && window.location.hash === INTEGRATION_KEY_DIALOG_HASH) {
       const url = new URL(window.location.href);
       url.hash = '';
@@ -55,7 +55,8 @@ export function ServiceCredentials({ sessionId }: { sessionId: string }) {
       >
         <DialogHeader>
           <DialogTitle>
-            Add API key integration for {integrationName}
+            Add API key integration
+            {integrationName ? ` for ${integrationName}` : ''}
           </DialogTitle>
           <DialogDescription>
             The key is encrypted in our deployment database and never sent to
@@ -90,6 +91,8 @@ function ServiceCredentialsForm({
   );
   const [selectedRef, setSelectedRef] = useState('');
   const [loading, setLoading] = useState(true);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [available, setAvailable] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -104,6 +107,7 @@ function ServiceCredentialsForm({
   }
   useEffect(() => {
     const controller = new AbortController();
+    setLoading(true);
     void (async () => {
       try {
         const response = await fetch(endpoint, {
@@ -111,28 +115,54 @@ function ServiceCredentialsForm({
           credentials: 'same-origin',
           signal: controller.signal,
         });
-        if (!response.ok) throw new Error('Unavailable');
+        if (controller.signal.aborted) return;
+        if (!response.ok) {
+          if (response.status === 401 || response.status === 403) {
+            setLoadError(
+              "Sign in as this session's owner to view API key requests.",
+            );
+            return;
+          }
+          throw new Error('Unavailable');
+        }
         const data = (await response.json()) as ServiceCredentialApprovals;
         if (controller.signal.aborted) return;
         setPending(data.pending);
         setSelectedRef(data.pending[0]?.pendingRef ?? '');
-        onIntegrationNameChange(data.pending[0]?.label ?? 'integration');
+        onIntegrationNameChange(data.pending[0]?.label ?? '');
         setAvailable(true);
+        setLoadError(null);
       } catch {
         if (!controller.signal.aborted)
-          setError(
-            "API key approval is unavailable. Sign in as this session's owner and try again.",
-          );
+          setLoadError('Could not load API key requests.');
       } finally {
         if (!controller.signal.aborted) setLoading(false);
       }
     })();
     return () => controller.abort();
-  }, [endpoint, onIntegrationNameChange]);
+  }, [endpoint, onIntegrationNameChange, loadAttempt]);
 
   return (
     <div className="space-y-4">
-      {loading ? <Skeleton className="h-24 w-full" /> : null}
+      {loading && !loadError ? <Skeleton className="h-24 w-full" /> : null}
+      {loadError ? (
+        <div
+          role="alert"
+          className="flex flex-wrap items-center justify-between gap-2 text-sm"
+        >
+          <p>{loadError}</p>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={loading}
+            aria-busy={loading}
+            onClick={() => setLoadAttempt((attempt) => attempt + 1)}
+          >
+            Retry
+          </Button>
+        </div>
+      ) : null}
       {error ? (
         <p role="alert" className="text-sm text-destructive">
           {error}

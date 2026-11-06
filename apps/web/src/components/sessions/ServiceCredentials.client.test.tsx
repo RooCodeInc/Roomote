@@ -52,6 +52,69 @@ function fill() {
     target: { value: credential },
   });
 }
+it('retries a failed approval read in the same dialog without submitting a key', async () => {
+  fetchMock.mockRejectedValueOnce(new Error('Network unavailable'));
+  window.location.hash = '#integrations';
+  render(<ServiceCredentials sessionId={sessionId} />);
+  await screen.findByText('Could not load API key requests.');
+  expect(
+    screen.queryByRole('button', { name: 'Save' }),
+  ).not.toBeInTheDocument();
+  let finish!: (response: Response) => void;
+  fetchMock.mockReturnValueOnce(
+    new Promise<Response>((resolve) => {
+      finish = resolve;
+    }),
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+  expect(await screen.findByRole('button', { name: 'Retry' })).toBeDisabled();
+  finish(new Response(JSON.stringify({ pending: [pending], secrets: [] })));
+  await screen.findByLabelText('API key');
+  expect(
+    screen.queryByText('Could not load API key requests.'),
+  ).not.toBeInTheDocument();
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  expect(
+    fetchMock.mock.calls.every(([, options]) => options.method === undefined),
+  ).toBe(true);
+  expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
+});
+it.each([401, 403])(
+  'retains owner guidance for an actual %s read refusal',
+  async (status) => {
+    fetchMock.mockResolvedValueOnce(new Response(null, { status }));
+    window.location.hash = '#integrations';
+    render(<ServiceCredentials sessionId={sessionId} />);
+    await screen.findByText(
+      "Sign in as this session's owner to view API key requests.",
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    await screen.findByLabelText('API key');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  },
+);
+it('aborts a pending retry when the dialog closes and ignores its late result', async () => {
+  fetchMock.mockResolvedValueOnce(new Response(null, { status: 500 }));
+  window.location.hash = '#integrations';
+  render(<ServiceCredentials sessionId={sessionId} />);
+  await screen.findByText('Could not load API key requests.');
+  let finish!: (response: Response) => void;
+  fetchMock.mockReturnValueOnce(
+    new Promise<Response>((resolve) => {
+      finish = resolve;
+    }),
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+  await screen.findByRole('button', { name: 'Retry' });
+  const signal = fetchMock.mock.calls[1]![1].signal as AbortSignal;
+  fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+  await waitFor(() => expect(signal.aborted).toBe(true));
+  finish(new Response(null, { status: 403 }));
+  await waitFor(() =>
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
+  );
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+});
 it('does not approve while requests are loading', async () => {
   let finish!: (response: Response) => void;
   fetchMock.mockReturnValueOnce(
@@ -246,7 +309,9 @@ it.each([401, 403, 500])(
     window.location.hash = '#integrations';
     render(<ServiceCredentials sessionId={sessionId} />);
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Sign in as this session',
+      status === 500
+        ? 'Could not load API key requests.'
+        : 'Sign in as this session',
     );
     expect(document.body.textContent).not.toContain(credential);
   },
