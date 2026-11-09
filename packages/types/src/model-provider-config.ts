@@ -770,6 +770,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     defaultRoomoteModel: 'vercel/openai/gpt-5.6-luna',
     authKind: 'api-key',
     suggestedTaskModels: mapRecommendedTaskModels({
+      'claude-fable-5-2': 'vercel/anthropic/claude-fable-5.2',
       'claude-fable-5-1': 'vercel/anthropic/claude-fable-5.1',
       'claude-fable-5': 'vercel/anthropic/claude-fable-5',
       'claude-haiku-5-5': 'vercel/anthropic/claude-haiku-5.5',
@@ -816,6 +817,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     authKind: 'api-key',
     // Requesty's models.dev slugs are provider-local rather than lab/model.
     suggestedTaskModels: mapRecommendedTaskModels({
+      'claude-fable-5-2': 'requesty/anthropic/claude-fable-5.2',
       'claude-fable-5-1': 'requesty/claude-fable-5.1',
       'claude-fable-5': 'requesty/claude-fable-5',
       'claude-haiku-5-5': 'requesty/anthropic/claude-haiku-5-5',
@@ -946,6 +948,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-5-6-terra': 'azure/gpt-5.6-terra',
       'gpt-5-6-luna': 'azure/gpt-5.6-luna',
       'gpt-6-luna': 'azure/gpt-6-luna',
+      'claude-fable-5-2': 'azure/claude-fable-5-2',
       'claude-opus-5-5': 'azure/claude-opus-5-5',
       'claude-haiku-5-5': 'azure/claude-haiku-5-5',
       'claude-sonnet-5-5': 'azure/claude-sonnet-5-5',
@@ -989,6 +992,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-5-6-terra': 'azure-cognitive-services/gpt-5.6-terra',
       'gpt-5-6-luna': 'azure-cognitive-services/gpt-5.6-luna',
       'gpt-6-luna': 'azure-cognitive-services/gpt-6-luna',
+      'claude-fable-5-2': 'azure-cognitive-services/claude-fable-5-2',
       'claude-opus-5-5': 'azure-cognitive-services/claude-opus-5-5',
       'claude-haiku-5-5': 'azure-cognitive-services/claude-haiku-5-5',
       'claude-sonnet-5-5': 'azure-cognitive-services/claude-sonnet-5-5',
@@ -1011,6 +1015,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     defaultRoomoteModel: 'anthropic/claude-sonnet-5-5',
     authKind: 'api-key',
     suggestedTaskModels: mapRecommendedTaskModels({
+      'claude-fable-5-2': 'anthropic/claude-fable-5-2',
       'claude-fable-5-1': 'anthropic/claude-fable-5-1',
       'claude-fable-5': 'anthropic/claude-fable-5',
       'claude-haiku-5-5': 'anthropic/claude-haiku-5-5',
@@ -1095,6 +1100,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     defaultRoomoteModel: 'opencode/gpt-5.6-luna',
     authKind: 'api-key',
     suggestedTaskModels: mapRecommendedTaskModels({
+      'claude-fable-5-2': 'opencode/claude-fable-5-2',
       'claude-fable-5-1': 'opencode/claude-fable-5-1',
       'claude-fable-5': 'opencode/claude-fable-5',
       'claude-haiku-5-5': 'opencode/claude-haiku-5-5',
@@ -1193,6 +1199,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     defaultRoomoteModel: 'bedrock-mantle/openai.gpt-5.6-luna',
     authKind: 'api-key',
     suggestedTaskModels: mapRecommendedTaskModels({
+      'claude-fable-5-2': 'bedrock-mantle/anthropic.claude-fable-5-2',
       'claude-fable-5-1': 'bedrock-mantle/anthropic.claude-fable-5-1',
       'claude-fable-5': 'bedrock-mantle/anthropic.claude-fable-5',
       'claude-haiku-5-5': 'bedrock-mantle/anthropic.claude-haiku-5-5',

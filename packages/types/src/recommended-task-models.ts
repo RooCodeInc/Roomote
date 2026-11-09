@@ -29,6 +29,11 @@ type RecommendedTaskModel = {
  */
 export const RECOMMENDED_TASK_MODELS = [
   {
+    id: 'claude-fable-5-2',
+    displayName: 'Claude Fable 5.2',
+    family: 'Fable',
+  },
+  {
     id: 'claude-fable-5-1',
     displayName: 'Claude Fable 5.1',
     family: 'Fable',
@@ -117,6 +122,7 @@ export function mapRecommendedTaskModels(
  * lab in the recommended list).
  */
 export const OPENROUTER_RECOMMENDED_TASK_MODEL_SLUGS = {
+  'claude-fable-5-2': 'openrouter/anthropic/claude-fable-5.2',
   'claude-fable-5-1': 'openrouter/anthropic/claude-fable-5.1',
   'claude-fable-5': 'openrouter/anthropic/claude-fable-5',
   'claude-haiku-5-5': 'openrouter/anthropic/claude-haiku-5.5',

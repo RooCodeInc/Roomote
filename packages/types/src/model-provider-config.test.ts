@@ -508,6 +508,23 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
   it('preserves supported catalog routes for representative recommended models', () => {
     const expectedByModel = [
       {
+        displayName: 'Claude Fable 5.2',
+        expected: [
+          ['roomote', 'roomote/anthropic/claude-fable-5.2'],
+          ['openrouter', 'openrouter/anthropic/claude-fable-5.2'],
+          ['vercel', 'vercel/anthropic/claude-fable-5.2'],
+          ['requesty', 'requesty/anthropic/claude-fable-5.2'],
+          ['azure', 'azure/claude-fable-5-2'],
+          [
+            'azure-cognitive-services',
+            'azure-cognitive-services/claude-fable-5-2',
+          ],
+          ['anthropic', 'anthropic/claude-fable-5-2'],
+          ['opencode', 'opencode/claude-fable-5-2'],
+          ['amazon-bedrock', 'bedrock-mantle/anthropic.claude-fable-5-2'],
+        ],
+      },
+      {
         displayName: 'Claude Fable 5.1',
         expected: [
           ['roomote', 'roomote/anthropic/claude-fable-5.1'],
@@ -1237,6 +1254,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     expect(
       requestyProvider?.suggestedTaskModels.map((model) => model.id),
     ).toEqual([
+      'requesty/anthropic/claude-fable-5.2',
       'requesty/claude-fable-5.1',
       'requesty/claude-fable-5',
       'requesty/anthropic/claude-haiku-5-5',
