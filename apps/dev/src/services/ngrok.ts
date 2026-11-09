@@ -24,6 +24,7 @@ export class NgrokService {
   private static readonly WEB_TUNNEL_NAME = 'roomote-web-ngrok';
   private static readonly TUNNEL_POLL_INTERVAL_MS = 500;
   private static readonly TUNNEL_POLL_TIMEOUT_MS = 15_000;
+  private static readonly INSPECT_REQUEST_TIMEOUT_MS = 1_000;
 
   static async checkInstalled(_verbose: boolean): Promise<void> {
     const ngrokCheck = ora('Checking ngrok installation').start();
@@ -329,6 +330,7 @@ export class NgrokService {
       try {
         const response = await fetch(
           `http://127.0.0.1:${inspectPort}/api/tunnels`,
+          { signal: AbortSignal.timeout(this.INSPECT_REQUEST_TIMEOUT_MS) },
         );
 
         if (!response.ok) {

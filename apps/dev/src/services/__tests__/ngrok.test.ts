@@ -1,4 +1,5 @@
 import fs from 'fs';
+import { createServer, type Server } from 'node:http';
 
 import { execa } from 'execa';
 
@@ -69,6 +70,111 @@ describe('NgrokService.resolvePublicUrl', () => {
     vi.useRealTimers();
     process.env = originalEnv;
   });
+
+  it.each(['headers', 'body'])(
+    'finds the healthy next inspector when the first stalls its %s',
+    async (stall) => {
+      const actualFetch = globalThis.fetch;
+      const stalled = createServer((_request, response) => {
+        if (stall === 'body') {
+          response.writeHead(200, { 'Content-Type': 'application/json' });
+          response.write('{"tunnels":');
+        }
+      });
+      const healthy = createServer((_request, response) => {
+        response.writeHead(200, { 'Content-Type': 'application/json' });
+        response.end(
+          JSON.stringify({
+            tunnels: [
+              {
+                config: { addr: 'http://localhost:18080' },
+                public_url: 'https://static-roomote.ngrok.app',
+              },
+            ],
+          }),
+        );
+      });
+      const listen = (server: Server) =>
+        new Promise<number>((resolve, reject) => {
+          server.once('error', reject);
+          server.listen(0, '127.0.0.1', () => {
+            server.off('error', reject);
+            const address = server.address();
+            if (!address || typeof address === 'string')
+              return reject(new Error('Missing HTTP fixture port'));
+            resolve(address.port);
+          });
+        });
+
+      try {
+        const stalledPort = await listen(stalled);
+        const healthyPort = await listen(healthy);
+        process.env.R_PUBLIC_URL = 'https://static-roomote.ngrok.app';
+        vi.mocked(execa).mockResolvedValue({
+          stdout: 'Valid configuration file at /tmp/ngrok.yml',
+        } as Awaited<ReturnType<typeof execa>>);
+        vi.spyOn(fs, 'readFileSync').mockReturnValue('authtoken: test-token\n');
+        const fetchInspector = vi.fn((url: string, init?: RequestInit) => {
+          const original = new URL(url);
+          const port = original.port === '4040' ? stalledPort : healthyPort;
+          return actualFetch(
+            `http://127.0.0.1:${port}${original.pathname}`,
+            init,
+          );
+        });
+        vi.stubGlobal('fetch', fetchInspector);
+
+        await expect(
+          NgrokService.resolvePublicUrl({ port: 18080, verbose: false }),
+        ).resolves.toEqual({
+          autoNgrok: true,
+          publicUrl: 'https://static-roomote.ngrok.app',
+        });
+        expect(
+          fetchInspector.mock.calls.map(([url]) => new URL(url).port),
+        ).toEqual(['4040', '4041']);
+        expect(execa).not.toHaveBeenCalledWith(
+          'pm2',
+          expect.anything(),
+          expect.anything(),
+        );
+
+        // Remove the actual stalled responder; a deliberate rerun uses the
+        // healthy first inspector without starting another tunnel.
+        stalled.removeAllListeners('request');
+        stalled.on('request', (_request, response) => {
+          response.writeHead(200, { 'Content-Type': 'application/json' });
+          response.end(
+            JSON.stringify({
+              tunnels: [
+                {
+                  config: { addr: '18080' },
+                  public_url: 'https://static-roomote.ngrok.app',
+                },
+              ],
+            }),
+          );
+        });
+        fetchInspector.mockClear();
+        await expect(
+          NgrokService.resolvePublicUrl({ port: 18080, verbose: false }),
+        ).resolves.toEqual({
+          autoNgrok: true,
+          publicUrl: 'https://static-roomote.ngrok.app',
+        });
+        expect(fetchInspector).toHaveBeenCalledOnce();
+      } finally {
+        await Promise.all(
+          [stalled, healthy].map((server) => {
+            server.closeAllConnections();
+            return new Promise<void>((resolve) =>
+              server.close(() => resolve()),
+            );
+          }),
+        );
+      }
+    },
+  );
 
   it('uses an explicit R_PUBLIC_URL without starting ngrok', async () => {
     process.env.R_PUBLIC_URL =
