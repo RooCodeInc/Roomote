@@ -73,16 +73,32 @@ export function loadOnDemandMcpCatalog(
 
 async function withMcpClient<T>(
   server: OnDemandMcpServer,
-  fn: (client: Client) => Promise<T>,
+  timeoutMs: number,
+  fn: (client: Client, signal: AbortSignal) => Promise<T>,
 ): Promise<T> {
+  const controller = new AbortController();
   const transport = new StreamableHTTPClientTransport(new URL(server.url), {
     requestInit: { headers: server.headers ?? {} },
+    fetch: (url, init) =>
+      fetch(url, {
+        ...init,
+        signal: init?.signal
+          ? AbortSignal.any([controller.signal, init.signal])
+          : controller.signal,
+      }),
   });
   const client = new Client({ name: 'roomote-task', version: '1.0.0' });
-  await client.connect(transport);
+  const timeout = setTimeout(() => {
+    controller.abort(new Error(`MCP operation timed out after ${timeoutMs}ms`));
+  }, timeoutMs);
   try {
-    return await fn(client);
+    await client.connect(transport, {
+      signal: controller.signal,
+      timeout: timeoutMs,
+    });
+    return await fn(client, controller.signal);
   } finally {
+    clearTimeout(timeout);
     await client.close().catch(() => undefined);
   }
 }
@@ -94,16 +110,21 @@ function listOnDemandMcpTools(
 ): Promise<OnDemandMcpTool[]> {
   const cached = toolListCache.get(server.name);
   if (cached) return cached;
-  const listing = withMcpClient(server, async (client) => {
-    const result = await client.listTools(undefined, {
-      timeout: ON_DEMAND_MCP_LIST_TIMEOUT_MS,
-    });
-    return result.tools.map((tool) => ({
-      name: tool.name,
-      ...(tool.description ? { description: tool.description } : {}),
-      ...(tool.inputSchema ? { inputSchema: tool.inputSchema } : {}),
-    }));
-  }).catch((error: unknown) => {
+  const listing = withMcpClient(
+    server,
+    ON_DEMAND_MCP_LIST_TIMEOUT_MS,
+    async (client, signal) => {
+      const result = await client.listTools(undefined, {
+        timeout: ON_DEMAND_MCP_LIST_TIMEOUT_MS,
+        signal,
+      });
+      return result.tools.map((tool) => ({
+        name: tool.name,
+        ...(tool.description ? { description: tool.description } : {}),
+        ...(tool.inputSchema ? { inputSchema: tool.inputSchema } : {}),
+      }));
+    },
+  ).catch((error: unknown) => {
     toolListCache.delete(server.name);
     throw error;
   });
@@ -260,14 +281,18 @@ async function callOnDemandMcpTool(
   toolName: string,
   args: Record<string, unknown>,
 ): Promise<ToolResult> {
-  return withMcpClient(server, async (client) => {
-    const result = await client.callTool(
-      { name: toolName, arguments: args },
-      undefined,
-      { timeout: ON_DEMAND_MCP_CALL_TIMEOUT_MS },
-    );
-    // Pass the upstream content through unchanged; OpenCode renders it the
-    // same way it would a natively mounted MCP result.
-    return parseMcpToolResult(result).result as ToolResult;
-  });
+  return withMcpClient(
+    server,
+    ON_DEMAND_MCP_CALL_TIMEOUT_MS,
+    async (client, signal) => {
+      const result = await client.callTool(
+        { name: toolName, arguments: args },
+        undefined,
+        { timeout: ON_DEMAND_MCP_CALL_TIMEOUT_MS, signal },
+      );
+      // Pass the upstream content through unchanged; OpenCode renders it the
+      // same way it would a natively mounted MCP result.
+      return parseMcpToolResult(result).result as ToolResult;
+    },
+  );
 }
