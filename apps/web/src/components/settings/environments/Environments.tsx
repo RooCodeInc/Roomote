@@ -113,8 +113,9 @@ function EnvironmentRecipeDetails({ env }: { env: EnvironmentWithMeta }) {
 }
 
 export function Environments() {
-  const [environmentToDuplicate, setEnvironmentToDuplicate] =
-    useState<EnvironmentWithMeta>();
+  const [environmentToDuplicate, setEnvironmentToDuplicate] = useState<{
+    environment: EnvironmentWithMeta;
+  }>();
   const { isAdmin } = useAuthorizedUser();
   const environments = useEnvironments({ poll: true });
   const repositories = useRepositories();
@@ -272,7 +273,9 @@ export function Environments() {
                             <Button
                               variant="ghost"
                               size="icon"
-                              onClick={() => setEnvironmentToDuplicate(env)}
+                              onClick={() =>
+                                setEnvironmentToDuplicate({ environment: env })
+                              }
                               title="Duplicate"
                               aria-label="Duplicate"
                             >
@@ -498,7 +501,7 @@ export function Environments() {
         onOpenChange={(open) =>
           setEnvironmentToDuplicate(open ? environmentToDuplicate : undefined)
         }
-        environment={environmentToDuplicate}
+        environment={environmentToDuplicate?.environment}
         onDuplicate={async ({ id }, newName) => {
           const result = await duplicateEnvironment.mutateAsync({
             id,
@@ -506,7 +509,9 @@ export function Environments() {
           });
 
           if (result.success) {
-            setEnvironmentToDuplicate(undefined);
+            setEnvironmentToDuplicate((current) =>
+              current === environmentToDuplicate ? undefined : current,
+            );
           }
         }}
         isPending={duplicateEnvironment.isPending}
