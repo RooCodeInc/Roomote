@@ -24,7 +24,9 @@ ZAI_CODING_PLAN_API_KEY=...
 ZAI_CODING_PLAN_REGION=global # or china
 ```
 
-Both values are required. Models use the `zai-coding-plan/` prefix, keeping
+The configuration form requires a region selection. For environment-variable
+configuration, `ZAI_CODING_PLAN_REGION` defaults to `global` when unset; set it
+to `china` for a China-region membership key. Models use the `zai-coding-plan/` prefix, keeping
 their membership quota separate from metered `zai/` model IDs.
 
 ## Cost behavior
