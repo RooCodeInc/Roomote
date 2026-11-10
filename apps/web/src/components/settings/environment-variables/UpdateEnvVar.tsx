@@ -31,17 +31,22 @@ export function UpdateEnvVar({ envVar, onUpdated }: UpdateEnvVarProps) {
 
   const updateEnvVar = useUpdateEnvVar();
 
-  const onSubmit = (data: UpdateEnvVar) =>
+  const onSubmit = (data: UpdateEnvVar) => {
+    if (updateEnvVar.isPending) return;
+
     updateEnvVar.mutate(
       { id: envVar.id, value: data.value },
       {
         onSuccess: () => {
-          form.reset();
-          onUpdated();
+          if (form.getValues('value') === data.value) {
+            form.reset();
+            onUpdated();
+          }
         },
         onError: (error) => form.setError('root', { message: error.message }),
       },
     );
+  };
 
   const handleFormSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
