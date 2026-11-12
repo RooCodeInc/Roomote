@@ -16,6 +16,7 @@ export function PersonalSettingsRoute() {
 
   return (
     <PersonalSettingsPage
+      canChangeEmail={accountCapabilities.data?.canChangeEmail ?? false}
       canChangePassword={accountCapabilities.data?.canChangePassword ?? false}
       canSetPassword={accountCapabilities.data?.canSetPassword ?? false}
       profile={{

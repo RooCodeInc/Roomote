@@ -139,6 +139,7 @@ describe('UserProfileSection', () => {
   it('updates name and email from the expanded profile form', async () => {
     render(
       <UserProfileSection
+        canChangeEmail
         canChangePassword={true}
         profile={{
           email: 'ada@example.com',
@@ -198,6 +199,7 @@ describe('UserProfileSection', () => {
 
     render(
       <UserProfileSection
+        canChangeEmail
         canChangePassword={true}
         profile={{
           email: 'ada@example.com',
@@ -220,5 +222,48 @@ describe('UserProfileSection', () => {
       expect(routerRefreshMock).toHaveBeenCalled();
     });
     expect(toast.error).toHaveBeenCalledWith('Email update failed');
+  });
+
+  it('keeps email read-only while allowing name changes without verification delivery', async () => {
+    render(
+      <UserProfileSection
+        profile={{ email: 'ada@example.com', imageUrl: '', name: 'Ada User' }}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    expect(screen.getByLabelText('Email')).toHaveAttribute('readonly');
+    expect(screen.getByLabelText('Email')).toHaveAccessibleDescription(
+      'Email changes require email verification to be enabled for this deployment.',
+    );
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'New Name' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() =>
+      expect(updateUserMock).toHaveBeenCalledWith({ name: 'New Name' }),
+    );
+    expect(changeEmailMock).not.toHaveBeenCalled();
+    expect(toast.success).toHaveBeenCalledWith('Profile updated.');
+  });
+
+  it('does not submit an email draft after email capability becomes unavailable', async () => {
+    const profile = {
+      email: 'ada@example.com',
+      imageUrl: '',
+      name: 'Ada User',
+    };
+    const view = render(
+      <UserProfileSection canChangeEmail profile={profile} />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    fireEvent.change(screen.getByLabelText('Email'), {
+      target: { value: 'new@example.com' },
+    });
+    view.rerender(
+      <UserProfileSection canChangeEmail={false} profile={profile} />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    expect(changeEmailMock).not.toHaveBeenCalled();
+    expect(updateUserMock).not.toHaveBeenCalled();
   });
 });
