@@ -17,6 +17,8 @@ const validationRunner = resolve(
   'validate-domain-subprocess.sh',
 );
 
+const pathRunner = resolve(import.meta.dirname, 'resolve-path-subprocess.sh');
+
 function validateDomain(domain) {
   // Pass the runner script and the candidate domain as explicit positional
   // arguments to `bash` rather than interpolating either into a `-c` shell
@@ -60,7 +62,6 @@ test('deployment domains use valid DNS labels', () => {
 
 test('deployment paths preserve nested missing parents without creating them during resolution', () => {
   const cwd = mkdtempSync(join(tmpdir(), 'roomote-paths-'));
-  const lib = resolve(import.meta.dirname, '..', 'scripts', 'lib.sh');
   try {
     mkdirSync(join(cwd, 'existing dir'));
     for (const path of [
@@ -71,17 +72,10 @@ test('deployment paths preserve nested missing parents without creating them dur
       'existing dir',
       '-missing/nested',
     ]) {
-      const result = spawnSync(
-        'bash',
-        [
-          '-c',
-          'source "$1"; resolved=$(abs_path "$2"); printf "%s\\n" "$resolved"',
-          'path-test',
-          lib,
-          path,
-        ],
-        { cwd, encoding: 'utf8' },
-      );
+      const result = spawnSync('bash', [pathRunner, 'path', path], {
+        cwd,
+        encoding: 'utf8',
+      });
       assert.equal(result.status, 0, result.stderr);
       assert.equal(
         result.stdout.trimEnd(),
@@ -90,23 +84,14 @@ test('deployment paths preserve nested missing parents without creating them dur
       assert.equal(result.stderr, '');
     }
     assert.equal(existsSync(join(cwd, 'missing')), false);
-    const state = spawnSync(
-      'bash',
-      [
-        '-c',
-        'source "$1"; customer_state_dir demo; terraform_state_file demo; terraform_tfvars_file demo',
-        'path-test',
-        lib,
-      ],
-      {
-        cwd,
-        encoding: 'utf8',
-        env: {
-          ...process.env,
-          ROOMOTE_DEPLOY_STATE_DIR: `${cwd}/missing/state`,
-        },
+    const state = spawnSync('bash', [pathRunner, 'state', 'demo'], {
+      cwd,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        ROOMOTE_DEPLOY_STATE_DIR: `${cwd}/missing/state`,
       },
-    );
+    });
     assert.equal(state.status, 0, state.stderr);
     assert.deepEqual(state.stdout.trim().split('\n'), [
       `${cwd}/missing/state/demo`,
