@@ -157,6 +157,7 @@ export function ScheduleOnlyAutomationContent({
       ) : editingSchedule ? (
         <div className="space-y-2">
           <Select
+            disabled={disabled}
             value={frequency}
             onValueChange={(value) => {
               onFrequencyChange(
@@ -192,6 +193,7 @@ export function ScheduleOnlyAutomationContent({
         </div>
       ) : (
         <SettingSummaryRow
+          disabled={disabled}
           icon={Calendar}
           label="Schedule"
           value={

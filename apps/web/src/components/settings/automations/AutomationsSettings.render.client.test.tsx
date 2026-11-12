@@ -110,6 +110,9 @@ const state = vi.hoisted(() => ({
     slackChannelAccessWarnings: Record<string, unknown>;
     slackChannelDisplayNames: Record<string, unknown>;
   } | null,
+  realSettingsMutation: null as
+    | ((variables: unknown) => Promise<unknown>)
+    | null,
   settingsQuery: {
     isPending: false,
     data: {
@@ -568,6 +571,7 @@ vi.mock('@tanstack/react-query', () => ({
     ) => void;
     onError?: (...args: unknown[]) => void;
     mutationKind?:
+      | 'updateSettings'
       | 'triggerCustomAutomation'
       | 'setCustomAutomationWebhookEnabled'
       | 'rotateCustomAutomationWebhook'
@@ -575,6 +579,19 @@ vi.mock('@tanstack/react-query', () => ({
       | 'rotateBuiltInAutomationWebhook';
     mutationKey?: unknown[];
   }) => {
+    if (
+      _options?.mutationKind === 'updateSettings' &&
+      state.realSettingsMutation
+    ) {
+      return actualQuery.useMutation({
+        mutationFn: state.realSettingsMutation,
+        onSuccess: (result) =>
+          _options.onSuccess?.(
+            result as NonNullable<typeof state.nextUpdateSettingsResult>,
+          ),
+        onError: (error) => _options.onError?.(error),
+      });
+    }
     return {
       isPending:
         _options?.mutationKind === 'triggerCustomAutomation' &&
@@ -741,7 +758,7 @@ vi.mock('@/trpc/client', () => ({
           mutations.latestSettingsOptions =
             (options as typeof mutations.latestSettingsOptions) ?? null;
 
-          return options ?? {};
+          return { ...options, mutationKind: 'updateSettings' };
         },
       },
       triggerAutomation: {
@@ -1071,6 +1088,7 @@ function setRunnableCustomAutomation(launchCriteria?: string) {
 
 describe('AutomationsSettings', () => {
   beforeEach(() => {
+    state.realSettingsMutation = null;
     vi.useRealTimers();
     vi.clearAllMocks();
     state.nextUpdateSettingsResult = null;
@@ -2064,6 +2082,73 @@ describe('AutomationsSettings', () => {
       'alert',
     );
   });
+
+  it.each([false, true])(
+    'locks schedule editing during a genuine deferred save (open editor: %s) and restores it after failure',
+    async (editorOpen) => {
+      let rejectSave!: (error: Error) => void;
+      state.realSettingsMutation = (variables) => {
+        mutations.updateSettings(variables);
+        return new Promise((_resolve, reject) => {
+          rejectSave = reject;
+        });
+      };
+      state.settingsQuery.data.settings.securityAuditorFrequency = 'off';
+      const client = new QueryClient({
+        defaultOptions: { mutations: { retry: false } },
+      });
+      render(
+        <QueryClientProvider client={client}>
+          <AutomationsSettings />
+        </QueryClientProvider>,
+      );
+      fireEvent.click(
+        await screen.findByRole('button', { name: 'Set up Security Auditor' }),
+      );
+      editSummaryRow('Schedule');
+      fireEvent.click(
+        screen.getByRole('combobox', { name: 'Security Auditor schedule' }),
+      );
+      fireEvent.click(screen.getByRole('option', { name: 'On-demand' }));
+      if (editorOpen) editSummaryRow('Schedule');
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+      await waitFor(() =>
+        expect(
+          screen.getByRole('button', { name: 'Saving...' }),
+        ).toBeDisabled(),
+      );
+      expect(mutations.updateSettings).toHaveBeenCalledWith(
+        expect.objectContaining({
+          savingAutomation: 'securityAuditor',
+          securityAuditorFrequency: 'on_demand',
+        }),
+      );
+      const scheduleControl = editorOpen
+        ? screen.getByRole('combobox', { name: 'Security Auditor schedule' })
+        : within(screen.getByText('Schedule:').parentElement!).getByRole(
+            'button',
+            { name: 'Edit' },
+          );
+      expect(scheduleControl).toBeDisabled();
+      await act(async () => {
+        rejectSave(new Error('Synthetic save failure'));
+      });
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled(),
+      );
+      expect(scheduleControl).toBeEnabled();
+      if (!editorOpen) editSummaryRow('Schedule');
+      expect(
+        screen.getByRole('combobox', { name: 'Security Auditor schedule' }),
+      ).toHaveTextContent('On-demand');
+      fireEvent.click(
+        screen.getByRole('combobox', { name: 'Security Auditor schedule' }),
+      );
+      fireEvent.click(screen.getByRole('option', { name: 'Weekly' }));
+      expect(screen.getByText('Weekly', { exact: true })).toBeVisible();
+      client.clear();
+    },
+  );
 
   it('disables a scheduled automation directly', async () => {
     state.settingsQuery.data.settings.managerStatsFrequency = 'weekly' as never;
