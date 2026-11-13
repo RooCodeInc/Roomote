@@ -499,6 +499,8 @@ describe('createTaskRunGitHubToken', () => {
     expect(consoleWarnSpy).toHaveBeenCalledWith(
       expect.stringContaining('Not reachable with this token: owner-a/api'),
     );
+    expect(mockFindMany).toHaveBeenCalledTimes(1);
+    expect(mockCreateGitHubTokenWithMetadata).toHaveBeenCalledTimes(1);
     consoleWarnSpy.mockRestore();
   });
 
@@ -888,7 +890,117 @@ describe('createTaskRunGitHubToken', () => {
       installationId: 'install-a',
       repositoryIds: [401],
     });
+    expect(mockFindMany).toHaveBeenCalledTimes(1);
     consoleWarnSpy.mockRestore();
+  });
+
+  it('uses the same resolved stamp for environment primary and additional Git credentials', async () => {
+    const prepared = {
+      fullName: 'owner-a/api',
+      installationId: 'install-a',
+      githubRepoId: 401,
+      isActive: true,
+      sourceControlProvider: 'github',
+    };
+    const expanded = {
+      ...prepared,
+      fullName: 'owner-a/legacy',
+      githubRepoId: 402,
+    };
+    const other = {
+      ...prepared,
+      fullName: 'owner-b/web',
+      installationId: 'install-b',
+      githubRepoId: 501,
+    };
+    mockFindEnvironmentFirst.mockResolvedValue({
+      id: 'environment-id',
+      config: buildEnvironmentConfig([prepared.fullName]),
+    });
+    mockFindMappings.mockResolvedValue([{ repository: prepared }]);
+    mockFindMany
+      .mockResolvedValueOnce([prepared, expanded])
+      .mockResolvedValueOnce([
+        prepared,
+        other,
+        { ...other, fullName: 'owner-b/docs', githubRepoId: 502 },
+        { ...other, fullName: 'owner-b/no-id', githubRepoId: null },
+        {
+          ...other,
+          fullName: 'owner-c/no-id',
+          installationId: 'install-c',
+          githubRepoId: null,
+        },
+      ]);
+
+    const result = await createTaskRunWorkerGitHubTokenWithMetadata(
+      buildTaskRun({
+        repo: prepared.fullName,
+        environmentId: 'environment-id',
+        repositoryProviders: Object.fromEntries(
+          [
+            prepared.fullName,
+            other.fullName,
+            'owner-b/docs',
+            'owner-b/no-id',
+            'owner-c/no-id',
+            'owner-b/unavailable',
+          ].map((name) => [name, 'github']),
+        ),
+      } as TaskRun['payload']),
+    );
+
+    // One environment expansion and one stamp lookup, both before any mint.
+    expect(mockFindMany).toHaveBeenCalledTimes(2);
+    expect(mockFindMany.mock.invocationCallOrder[1]).toBeLessThan(
+      mockCreateGitHubTokenWithMetadata.mock.invocationCallOrder[0]!,
+    );
+    expect(
+      mockCreateGitHubTokenWithMetadata.mock.calls.map(([options]) => options),
+    ).toEqual([
+      {
+        type: 'installationId',
+        installationId: 'install-a',
+        repositoryIds: [401, 402],
+      },
+      {
+        type: 'installationId',
+        installationId: 'install-b',
+        repositoryIds: [501, 502],
+      },
+    ]);
+    expect(
+      result.gitCredentials?.map((credential) => credential.repositoryFullName),
+    ).toEqual(['owner-b/web', 'owner-b/docs']);
+  });
+
+  it('fails a spanning stamp when its primary repository is unavailable', async () => {
+    mockFindMany.mockResolvedValue([
+      {
+        fullName: 'owner-a/api',
+        installationId: 'install-a',
+        githubRepoId: 401,
+      },
+      {
+        fullName: 'owner-b/web',
+        installationId: 'install-b',
+        githubRepoId: 402,
+      },
+    ]);
+    await expect(
+      createTaskRunWorkerGitHubTokenWithMetadata(
+        buildTaskRun({
+          repo: 'owner-c/deleted',
+          repositoryProviders: {
+            'owner-a/api': 'github',
+            'owner-b/web': 'github',
+            'owner-c/deleted': 'github',
+          },
+        } as TaskRun['payload']),
+      ),
+    ).rejects.toThrow(GitHubInstallationSpanError);
+    expect(mockFindMany).toHaveBeenCalledTimes(1);
+    expect(mockCreateGitHubTokenWithMetadata).not.toHaveBeenCalled();
   });
 
   it('skips another installation that fails to mint without failing the run', async () => {

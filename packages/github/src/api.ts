@@ -68,11 +68,10 @@ export function isGitHubInstallationSpanError(
   return error instanceof GitHubInstallationSpanError;
 }
 
-async function resolveTokenOptionsForRepositoryNames({
+async function resolveRepositoryRows({
   taskRun,
   repositoryNames,
   missingMessagePrefix,
-  spanningMessagePrefix,
   repositoryRows,
   skipUnavailableRepositories = false,
 }: {
@@ -88,11 +87,7 @@ async function resolveTokenOptionsForRepositoryNames({
    * one stamped repository is still available.
    */
   skipUnavailableRepositories?: boolean;
-}): Promise<
-  Extract<CreateGitHubTokenOptions, { type: 'installationId' }> & {
-    installationId: string;
-  }
-> {
+}): Promise<Repository[]> {
   const uniqueRepositoryNames = [
     ...new Set(
       repositoryRows
@@ -134,6 +129,17 @@ async function resolveTokenOptionsForRepositoryNames({
     );
   }
 
+  return selectedRepoRows;
+}
+
+function tokenOptionsForRepositoryRows(
+  taskRun: TaskRun,
+  selectedRepoRows: Repository[],
+  spanningMessagePrefix: string,
+  repositoryNames = selectedRepoRows.map((row) => row.fullName),
+): Extract<CreateGitHubTokenOptions, { type: 'installationId' }> & {
+  installationId: string;
+} {
   const installationIds = [
     ...new Set(
       selectedRepoRows
@@ -154,7 +160,7 @@ async function resolveTokenOptionsForRepositoryNames({
     // every repo in the org would defeat the scoping this path guarantees.
     if (repositoryIds.length === 0) {
       throw new Error(
-        `${spanningMessagePrefix} for task run ${taskRun.id} resolved no GitHub repository ids for selected repositories: ${uniqueRepositoryNames.join(', ')}`,
+        `${spanningMessagePrefix} for task run ${taskRun.id} resolved no GitHub repository ids for selected repositories: ${repositoryNames.join(', ')}`,
       );
     }
 
@@ -168,7 +174,18 @@ async function resolveTokenOptionsForRepositoryNames({
   throw new GitHubInstallationSpanError(
     spanningMessagePrefix,
     taskRun.id,
-    uniqueRepositoryNames,
+    repositoryNames,
+  );
+}
+
+async function resolveTokenOptionsForRepositoryNames(
+  input: Parameters<typeof resolveRepositoryRows>[0],
+) {
+  return tokenOptionsForRepositoryRows(
+    input.taskRun,
+    await resolveRepositoryRows(input),
+    input.spanningMessagePrefix,
+    input.repositoryNames,
   );
 }
 
@@ -283,12 +300,7 @@ export async function resolveTaskRunEnvironmentGitHubRepositories(
   });
 }
 
-/**
- * Narrows a stamped repository scope that spans GitHub App installations to
- * the repositories on the installation that owns the task's own repository
- * (`payload.repo`). Returns null when that repository is not an active GitHub
- * repository, so callers keep failing closed.
- */
+/** Choose the same oldest active installation used by unconnected reads. */
 async function resolveOldestInstallationId(
   rows: Repository[],
 ): Promise<string | null> {
@@ -311,60 +323,14 @@ async function resolveOldestInstallationId(
   return oldest?.id ?? null;
 }
 
-async function resolvePrimaryRepositoryInstallationScope(
+type TaskRunGitHubCredentialPlan = {
+  primary: CreateGitHubTokenOptions;
+  additional: Map<string, Repository[]>;
+};
+
+async function resolveTaskRunGitHubCredentialPlan(
   taskRun: TaskRun,
-  stampedRepositories: string[],
-): Promise<CreateGitHubTokenOptions | null> {
-  const primaryRepository = taskRun.payload.repo;
-  const allRepositories =
-    !primaryRepository || primaryRepository === ALL_REPOSITORIES;
-  if (!allRepositories && !stampedRepositories.includes(primaryRepository)) {
-    return null;
-  }
-
-  const stampedRows = await db.query.repositories.findMany({
-    where: and(
-      eq(repositories.sourceControlProvider, DEFAULT_SOURCE_CONTROL_PROVIDER),
-      eq(repositories.isActive, true),
-      inArray(repositories.fullName, stampedRepositories),
-    ),
-  });
-  // All-repository runs have no repository of their own: anchor on the
-  // deployment's oldest active installation, the same one unconnected reads
-  // use. Repositories on other installations get their own git credentials.
-  const primaryInstallationId = allRepositories
-    ? await resolveOldestInstallationId(stampedRows)
-    : stampedRows.find((row) => row.fullName === primaryRepository)
-        ?.installationId;
-  if (!primaryInstallationId) {
-    return null;
-  }
-
-  const sameInstallationRows = stampedRows.filter(
-    (row) => row.installationId === primaryInstallationId,
-  );
-  const includedRepositories = new Set(
-    sameInstallationRows.map((row) => row.fullName),
-  );
-  const excludedRepositories = stampedRepositories.filter(
-    (repository) => !includedRepositories.has(repository),
-  );
-  console.warn(
-    `[resolveTaskRunGitHubTokenOptions] Stamped GitHub repositories for task run ${taskRun.id} span multiple installations; minting the ${allRepositories ? 'oldest' : primaryRepository} installation only (other installations get git credentials). Not reachable with this token: ${excludedRepositories.join(', ')}`,
-  );
-
-  return resolveTokenOptionsForRepositoryNames({
-    taskRun,
-    repositoryNames: sameInstallationRows.map((row) => row.fullName),
-    repositoryRows: sameInstallationRows,
-    missingMessagePrefix: 'Stamped repositories not found',
-    spanningMessagePrefix: 'Stamped repositories',
-  });
-}
-
-async function resolveTaskRunGitHubTokenOptions(
-  taskRun: TaskRun,
-): Promise<CreateGitHubTokenOptions> {
+): Promise<TaskRunGitHubCredentialPlan> {
   const stampedRepositories =
     resolveRepositoryNamesForSourceControlProviderFromPayload(
       taskRun.payload,
@@ -372,80 +338,102 @@ async function resolveTaskRunGitHubTokenOptions(
     );
   const repositoryRows =
     await resolveTaskRunEnvironmentGitHubRepositories(taskRun);
-
-  // Legacy environment payloads only stamped their initially prepared
-  // repositories, so retain the same-installation expansion for those runs.
-  // New checkout-scope stamps include every advertised GitHub repository. Prefer
-  // a token that covers that full stamp, but fall back to the environment
-  // installation when the stamp spans GitHub App installations.
   const environmentRepositoryNames = new Set(
     repositoryRows?.map((repository) => repository.fullName) ?? [],
   );
-  if (
-    stampedRepositories?.some(
-      (repository) => !environmentRepositoryNames.has(repository),
-    )
-  ) {
-    try {
-      return await resolveTokenOptionsForRepositoryNames({
-        taskRun,
-        repositoryNames: stampedRepositories,
-        missingMessagePrefix: 'Stamped repositories not found',
-        spanningMessagePrefix: 'Stamped repositories',
-        skipUnavailableRepositories: true,
-      });
-    } catch (error) {
-      if (!isGitHubInstallationSpanError(error)) {
-        throw error;
-      }
-
-      // Without an environment (all-repository workspaces, PR reviews), keep
-      // the stamped repositories on the task's own repository installation so
-      // a second connected organization does not block every run.
-      if (!repositoryRows?.length) {
-        const primaryOptions = await resolvePrimaryRepositoryInstallationScope(
+  const stampExtendsEnvironment = stampedRepositories?.some(
+    (repository) => !environmentRepositoryNames.has(repository),
+  );
+  const stampedRows = stampedRepositories?.length
+    ? !stampExtendsEnvironment && repositoryRows
+      ? repositoryRows.filter((row) =>
+          stampedRepositories.includes(row.fullName),
+        )
+      : await resolveRepositoryRows({
           taskRun,
-          stampedRepositories,
-        );
-        if (!primaryOptions) {
-          throw error;
-        }
-        return primaryOptions;
-      }
+          repositoryNames: stampedRepositories,
+          missingMessagePrefix: 'Stamped repositories not found',
+          spanningMessagePrefix: 'Stamped repositories',
+          skipUnavailableRepositories: true,
+        })
+    : [];
+  const rowsByInstallation = new Map<string, Repository[]>();
+  for (const row of stampedRows) {
+    if (!row.installationId) continue;
+    const group = rowsByInstallation.get(row.installationId) ?? [];
+    group.push(row);
+    rowsByInstallation.set(row.installationId, group);
+  }
+  const plan = (
+    primary: CreateGitHubTokenOptions,
+  ): TaskRunGitHubCredentialPlan => {
+    if (primary.type === 'installationId') {
+      rowsByInstallation.delete(String(primary.installationId));
+    } else {
+      rowsByInstallation.clear();
+    }
+    return { primary, additional: rowsByInstallation };
+  };
 
-      // Extra advertised checkouts can span GitHub App installations. Mint the
-      // environment's installation instead of blocking a workspace that already
-      // has a single-installation GitHub scope.
-
-      // The payload still advertises the excluded repositories as on-demand
-      // checkouts, so name them: a later clone failure is otherwise opaque.
-      const excludedRepositories = stampedRepositories.filter(
-        (repository) => !environmentRepositoryNames.has(repository),
-      );
-      console.warn(
-        `[resolveTaskRunGitHubTokenOptions] Stamped GitHub repositories for task run ${taskRun.id} span multiple installations; minting the environment installation only. Not reachable with this token: ${excludedRepositories.join(', ')}`,
+  // Legacy stamps retain the environment's same-installation expansion. A
+  // broader stamp takes precedence only when it fits one installation.
+  if (stampedRepositories && stampExtendsEnvironment) {
+    if (rowsByInstallation.size === 1) {
+      return plan(
+        tokenOptionsForRepositoryRows(
+          taskRun,
+          stampedRows,
+          'Stamped repositories',
+        ),
       );
     }
+    const primaryRepository = taskRun.payload.repo;
+    const allRepositories =
+      !primaryRepository || primaryRepository === ALL_REPOSITORIES;
+    const primaryInstallationId = repositoryRows
+      ? null
+      : allRepositories
+        ? await resolveOldestInstallationId(stampedRows)
+        : stampedRows.find((row) => row.fullName === primaryRepository)
+            ?.installationId;
+    const primaryRows =
+      repositoryRows ??
+      (primaryInstallationId
+        ? rowsByInstallation.get(primaryInstallationId)
+        : undefined);
+    if (!primaryRows?.length) {
+      throw new GitHubInstallationSpanError(
+        'Stamped repositories',
+        taskRun.id,
+        stampedRepositories,
+      );
+    }
+    const includedRepositories = new Set(
+      primaryRows.map((row) => row.fullName),
+    );
+    const excludedRepositories = stampedRepositories.filter(
+      (name) => !includedRepositories.has(name),
+    );
+    console.warn(
+      `[resolveTaskRunGitHubTokenOptions] Stamped GitHub repositories for task run ${taskRun.id} span multiple installations; minting the ${repositoryRows ? 'environment' : allRepositories ? 'oldest' : primaryRepository} installation only (other installations get git credentials). Not reachable with this token: ${excludedRepositories.join(', ')}`,
+    );
+    return plan(
+      tokenOptionsForRepositoryRows(
+        taskRun,
+        primaryRows,
+        repositoryRows ? 'Environment repositories' : 'Stamped repositories',
+      ),
+    );
   }
 
   if (repositoryRows !== null) {
-    return resolveTokenOptionsForRepositoryNames({
-      taskRun,
-      repositoryNames: repositoryRows.map((row) => row.fullName),
-      repositoryRows,
-      missingMessagePrefix: 'Environment repositories not found',
-      spanningMessagePrefix: 'Environment repositories',
-    });
-  }
-
-  if (stampedRepositories && stampedRepositories.length > 0) {
-    return resolveTokenOptionsForRepositoryNames({
-      taskRun,
-      repositoryNames: stampedRepositories,
-      missingMessagePrefix: 'Stamped repositories not found',
-      spanningMessagePrefix: 'Stamped repositories',
-      skipUnavailableRepositories: true,
-    });
+    return plan(
+      tokenOptionsForRepositoryRows(
+        taskRun,
+        repositoryRows,
+        'Environment repositories',
+      ),
+    );
   }
 
   const selectedRepositories = Array.isArray(
@@ -455,12 +443,14 @@ async function resolveTaskRunGitHubTokenOptions(
     : [];
 
   if (selectedRepositories.length > 0) {
-    return resolveTokenOptionsForRepositoryNames({
-      taskRun,
-      repositoryNames: selectedRepositories,
-      missingMessagePrefix: 'Selected repositories not found',
-      spanningMessagePrefix: 'Selected repositories',
-    });
+    return plan(
+      await resolveTokenOptionsForRepositoryNames({
+        taskRun,
+        repositoryNames: selectedRepositories,
+        missingMessagePrefix: 'Selected repositories not found',
+        spanningMessagePrefix: 'Selected repositories',
+      }),
+    );
   }
 
   const repo =
@@ -479,17 +469,19 @@ async function resolveTaskRunGitHubTokenOptions(
 
   const installationId = repo?.installationId;
 
-  return installationId
-    ? { type: 'installationId', installationId }
-    : { type: 'activeInstallation' };
+  return plan(
+    installationId
+      ? { type: 'installationId', installationId }
+      : { type: 'activeInstallation' },
+  );
 }
 
 export async function createTaskRunGitHubTokenWithMetadata(
   taskRun: TaskRun,
   runtimeOptions?: CreateGitHubTokenRuntimeOptions,
 ): Promise<GitHubTokenMetadata> {
-  const options = await resolveTaskRunGitHubTokenOptions(taskRun);
-  return createGitHubTokenWithMetadata(options, undefined, runtimeOptions);
+  const plan = await resolveTaskRunGitHubCredentialPlan(taskRun);
+  return createGitHubTokenWithMetadata(plan.primary, undefined, runtimeOptions);
 }
 
 export const createTaskRunGitHubToken = async (
@@ -578,24 +570,18 @@ export type TaskRunWorkerGitHubToken = {
 export async function createTaskRunWorkerGitHubTokenWithMetadata(
   taskRun: TaskRun,
 ): Promise<TaskRunWorkerGitHubToken> {
-  const options = await resolveTaskRunGitHubTokenOptions(taskRun);
-  const metadata = await createGitHubTokenWithMetadata(options);
-  const additional =
-    options.type === 'installationId'
-      ? await createAdditionalInstallationGitCredentials(
-          taskRun,
-          String(options.installationId),
-        )
-      : null;
+  const plan = await resolveTaskRunGitHubCredentialPlan(taskRun);
+  const metadata = await createGitHubTokenWithMetadata(plan.primary);
+  const additional = await createAdditionalInstallationGitCredentials(
+    taskRun,
+    plan.additional,
+  );
 
   return {
     token: metadata.token,
     source: 'app',
-    expiresAt: earliestTokenExpiry(
-      metadata.expiresAt,
-      additional?.expiresAt ?? null,
-    ),
-    ...(additional?.credentials.length
+    expiresAt: earliestTokenExpiry(metadata.expiresAt, additional.expiresAt),
+    ...(additional.credentials.length
       ? { gitCredentials: additional.credentials }
       : {}),
   };
@@ -633,44 +619,16 @@ function earliestTokenExpiry(left: Date | null, right: Date | null) {
  */
 async function createAdditionalInstallationGitCredentials(
   taskRun: TaskRun,
-  primaryInstallationId: string,
+  rowsByInstallation: TaskRunGitHubCredentialPlan['additional'],
 ): Promise<{
   credentials: SourceControlGitCredential[];
   expiresAt: Date | null;
 }> {
-  const stampedRepositories =
-    resolveRepositoryNamesForSourceControlProviderFromPayload(
-      taskRun.payload,
-      DEFAULT_SOURCE_CONTROL_PROVIDER,
-    ) ?? [];
-  if (stampedRepositories.length === 0) {
-    return { credentials: [], expiresAt: null };
-  }
-
-  const rows = await db.query.repositories.findMany({
-    where: and(
-      eq(repositories.sourceControlProvider, DEFAULT_SOURCE_CONTROL_PROVIDER),
-      eq(repositories.isActive, true),
-      inArray(repositories.fullName, [...new Set(stampedRepositories)]),
-    ),
-  });
-  const rowsByInstallation = new Map<string, Repository[]>();
-  for (const row of rows) {
-    if (
-      !row.installationId ||
-      row.installationId === primaryInstallationId ||
-      row.githubRepoId == null
-    ) {
-      continue;
-    }
-    const group = rowsByInstallation.get(row.installationId) ?? [];
-    group.push(row);
-    rowsByInstallation.set(row.installationId, group);
-  }
-
   const credentials: SourceControlGitCredential[] = [];
   let expiresAt: Date | null = null;
-  for (const [installationId, group] of rowsByInstallation) {
+  for (const [installationId, rows] of rowsByInstallation) {
+    const group = rows.filter((row) => row.githubRepoId != null);
+    if (group.length === 0) continue;
     try {
       const metadata = await createGitHubTokenWithMetadata({
         type: 'installationId',
