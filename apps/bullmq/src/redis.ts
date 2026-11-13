@@ -14,6 +14,7 @@ export function getRedis(): Redis {
   const options: RedisOptions = {
     host: url.hostname,
     port: parseInt(url.port || '6379'),
+    db: Number(url.pathname.slice(1) || '0'),
     maxRetriesPerRequest: null, // Required by BullMQ.
     retryStrategy: (times: number) => {
       const delay = Math.min(times * 50, 5_000);
