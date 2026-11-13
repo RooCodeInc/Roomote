@@ -89,6 +89,8 @@ describe('BullMQ Redis URL database (real Redis)', () => {
     if (directory) await rm(directory, { recursive: true, force: true });
   });
 
+  afterEach(() => vi.unstubAllEnvs());
+
   it.each([
     { pathname: '/12', database: 12 },
     { pathname: '', database: 0 },
@@ -98,6 +100,7 @@ describe('BullMQ Redis URL database (real Redis)', () => {
     async ({ pathname, database }) => {
       vi.resetModules();
       config.redisUrl = `${baseUrl}${pathname}`;
+      vi.stubEnv('REDIS_URL', config.redisUrl);
       const { getRedis: getProducerRedis } = await import('@roomote/redis');
       const { getRedis: getWorkerRedis, closeRedis } = await import('./redis');
       const producer = getProducerRedis();
