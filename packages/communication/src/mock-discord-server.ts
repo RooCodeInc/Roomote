@@ -310,20 +310,32 @@ export class MockDiscordServer {
     if (this.server)
       throw new Error('Mock Discord server is already listening.');
     this.server = createServer(async (request, response) => {
-      const chunks: Buffer[] = [];
-      for await (const chunk of request) chunks.push(Buffer.from(chunk));
-      const baseUrl = `http://${request.headers.host ?? '127.0.0.1'}`;
-      const result = await this.handleRequest(
-        new URL(request.url ?? '/', baseUrl),
-        {
-          method: request.method,
-          headers: request.headers as HeadersInit,
-          ...(chunks.length ? { body: Buffer.concat(chunks) } : {}),
-        },
-      );
-      response.statusCode = result.status;
-      result.headers.forEach((value, key) => response.setHeader(key, value));
-      response.end(Buffer.from(await result.arrayBuffer()));
+      try {
+        const chunks: Buffer[] = [];
+        for await (const chunk of request) chunks.push(Buffer.from(chunk));
+        const baseUrl = `http://${request.headers.host ?? '127.0.0.1'}`;
+        const result = await this.handleRequest(
+          new URL(request.url ?? '/', baseUrl),
+          {
+            method: request.method,
+            headers: request.headers as HeadersInit,
+            ...(chunks.length ? { body: Buffer.concat(chunks) } : {}),
+          },
+        );
+        response.statusCode = result.status;
+        result.headers.forEach((value, key) => response.setHeader(key, value));
+        response.end(Buffer.from(await result.arrayBuffer()));
+      } catch (error) {
+        response.writeHead(500, { 'content-type': 'application/json' });
+        response.end(
+          JSON.stringify({
+            message:
+              error instanceof Error
+                ? error.message
+                : 'Unknown mock Discord error',
+          }),
+        );
+      }
     });
     await new Promise<void>((resolve, reject) => {
       this.server?.once('error', reject);
