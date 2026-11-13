@@ -117,7 +117,7 @@ export function ModelSelect({
           align="start"
           className="w-(--radix-popover-trigger-width) p-0"
         >
-          <Command>
+          <Command label={ariaLabel}>
             <CommandInput placeholder="Search models..." />
             <CommandList>
               <CommandEmpty>No models found.</CommandEmpty>
