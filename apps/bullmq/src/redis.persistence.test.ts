@@ -91,21 +91,57 @@ describe('BullMQ Redis URL database (real Redis)', () => {
 
   afterEach(() => vi.unstubAllEnvs());
 
-  it.each([
-    { pathname: '/12', database: 12 },
-    { pathname: '', database: 0 },
-    { pathname: '/0', database: 0 },
-  ])(
-    'consumes SDK-produced jobs in database $database for URL path "$pathname"',
-    async ({ pathname, database }) => {
+  const cases: {
+    label: string;
+    pathname: string;
+    database: number;
+    username?: string;
+    password?: string;
+  }[] = [
+    { label: 'database 12', pathname: '/12', database: 12 },
+    { label: 'default database', pathname: '', database: 0 },
+    { label: 'explicit database zero', pathname: '/0', database: 0 },
+    {
+      label: 'encoded ACL credentials',
+      pathname: '/12',
+      database: 12,
+      username: 'fixture@operator',
+      password: 'disposable:@password/#%',
+    },
+    {
+      label: 'plain ACL credentials',
+      pathname: '',
+      database: 0,
+      username: 'plain-fixture',
+      password: 'plain-disposable-password',
+    },
+  ];
+
+  it.each(cases)(
+    'completes SDK-produced work for $label',
+    async ({ pathname, database, username, password }) => {
       vi.resetModules();
-      config.redisUrl = `${baseUrl}${pathname}`;
+      const observer = new Redis(baseUrl);
+      if (username && password) {
+        await observer.acl(
+          'SETUSER',
+          username,
+          'on',
+          `>${password}`,
+          '~*',
+          '+@all',
+        );
+      }
+      const auth =
+        username && password
+          ? `${encodeURIComponent(username)}:${encodeURIComponent(password)}@`
+          : '';
+      config.redisUrl = `${baseUrl.replace('redis://', `redis://${auth}`)}${pathname}`;
       vi.stubEnv('REDIS_URL', config.redisUrl);
       const { getRedis: getProducerRedis } = await import('@roomote/redis');
       const { getRedis: getWorkerRedis, closeRedis } = await import('./redis');
       const producer = getProducerRedis();
       const consumer = getWorkerRedis();
-      const observer = new Redis(baseUrl);
       const name = `database-${randomUUID()}`;
       const marker = `${name}:processed`;
       const queue = new Queue(name, { connection: producer });

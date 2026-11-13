@@ -25,11 +25,11 @@ export function getRedis(): Redis {
   };
 
   if (url.username) {
-    options.username = url.username;
+    options.username = decodeURIComponent(url.username);
   }
 
   if (url.password) {
-    options.password = url.password;
+    options.password = decodeURIComponent(url.password);
   }
 
   if (url.protocol === 'rediss:') {
