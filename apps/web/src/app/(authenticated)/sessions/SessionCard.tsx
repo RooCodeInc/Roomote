@@ -70,7 +70,7 @@ type SessionCardData = {
 export function formatSessionCompactTimestamp(date: Date, now = new Date()) {
   if (isSameDay(date, now)) return format(date, 'HH:mm');
   if (isSameYear(date, now)) return format(date, 'LLL d');
-  return format(date, 'LLL d Y', { useAdditionalWeekYearTokens: true });
+  return format(date, 'LLL d yyyy');
 }
 
 export function SessionCard({

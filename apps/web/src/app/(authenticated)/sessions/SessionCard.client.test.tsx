@@ -15,6 +15,10 @@ describe('formatSessionCompactTimestamp', () => {
     [new Date(2026, 8, 21, 9, 5), '09:05'],
     [new Date(2026, 8, 20, 23, 59), 'Sep 20'],
     [new Date(2025, 6, 4, 12, 0), 'Jul 4 2025'],
+    [new Date(2025, 11, 28, 12, 0), 'Dec 28 2025'],
+    [new Date(2025, 11, 31, 12, 0), 'Dec 31 2025'],
+    [new Date(2024, 11, 29, 12, 0), 'Dec 29 2024'],
+    [new Date(2025, 0, 1, 12, 0), 'Jan 1 2025'],
   ])('formats %s for compact mobile display', (date, expected) => {
     expect(formatSessionCompactTimestamp(date, now)).toBe(expected);
   });
