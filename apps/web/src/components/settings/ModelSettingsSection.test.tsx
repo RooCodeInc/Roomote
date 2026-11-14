@@ -1224,6 +1224,124 @@ describe('ModelSettingsSection', () => {
     }
   });
 
+  it('dismisses suggestions with Escape without losing the slug or selecting a hidden option', async () => {
+    settingsData.current = buildSettingsData();
+    providerSetupData.current = buildProviderSetupData({
+      connectedProviderIds: ['anthropic'],
+    });
+    suggestionData.current = {
+      suggestions: [
+        { slug: 'claude-sonnet-4', displayName: 'Claude Sonnet 4' },
+      ],
+    };
+    renderModelSettingsSection();
+    const input = screen.getByLabelText('New model slug');
+    input.focus();
+    fireEvent.change(input, { target: { value: 'c' } });
+    await screen.findByRole('listbox', { name: 'Suggestions' });
+
+    fireEvent.keyDown(input, { key: 'Escape' });
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('listbox', { name: 'Suggestions' }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(input).toHaveValue('c');
+    expect(input).toHaveFocus();
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(input).toHaveValue('c');
+
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    await screen.findByRole('listbox', { name: 'Suggestions' });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(input).toHaveValue('claude-sonnet-4');
+    expect(updateMutateAsyncMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps a late replacement result dismissed until renewed input', async () => {
+    settingsData.current = buildSettingsData();
+    const setup = buildProviderSetupData({
+      connectedProviderIds: ['anthropic'],
+    });
+    providerSetupData.current = setup;
+    suggestionData.current = {
+      suggestions: [
+        { slug: 'claude-sonnet-4', displayName: 'Claude Sonnet 4' },
+      ],
+    };
+    const props = {
+      connectedProviders: setup.providerSetup.providers.filter(
+        (provider) =>
+          provider.runtimeApiKeySatisfied || provider.savedApiKeySatisfied,
+      ),
+      providerSetupPending: false,
+    };
+    const { rerender } = render(<ModelSettingsSection {...props} />);
+    const input = screen.getByLabelText('New model slug');
+    input.focus();
+    fireEvent.change(input, { target: { value: 'c' } });
+    await screen.findByRole('listbox', { name: 'Suggestions' });
+
+    suggestionData.current = null;
+    fireEvent.change(input, { target: { value: 'cl' } });
+    fireEvent.keyDown(input, { key: 'Escape' });
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('listbox', { name: 'Suggestions' }),
+      ).not.toBeInTheDocument(),
+    );
+    suggestionData.current = {
+      suggestions: [{ slug: 'claude-opus-4', displayName: 'Claude Opus 4' }],
+    };
+    rerender(<ModelSettingsSection {...props} />);
+    expect(
+      screen.queryByRole('listbox', { name: 'Suggestions' }),
+    ).not.toBeInTheDocument();
+    expect(input).toHaveValue('cl');
+
+    fireEvent.change(input, { target: { value: 'cla' } });
+    await screen.findByRole('listbox', { name: 'Suggestions' });
+    expect(
+      screen.getByRole('option', { name: /Claude Opus 4/ }),
+    ).toBeInTheDocument();
+    expect(updateMutateAsyncMock).not.toHaveBeenCalled();
+  });
+
+  it('dismisses outside interactions but keeps clicks in the slug input open', async () => {
+    settingsData.current = buildSettingsData();
+    providerSetupData.current = buildProviderSetupData({
+      connectedProviderIds: ['anthropic'],
+    });
+    suggestionData.current = {
+      suggestions: [
+        { slug: 'claude-sonnet-4', displayName: 'Claude Sonnet 4' },
+      ],
+    };
+    renderModelSettingsSection();
+    const input = screen.getByLabelText('New model slug');
+    input.focus();
+    fireEvent.change(input, { target: { value: 'c' } });
+    await screen.findByRole('listbox', { name: 'Suggestions' });
+    fireEvent.pointerDown(input);
+    expect(
+      screen.getByRole('listbox', { name: 'Suggestions' }),
+    ).toBeInTheDocument();
+
+    const outside = screen.getByRole('button', {
+      name: 'Use a mapping preset',
+    });
+    fireEvent.pointerDown(outside);
+    outside.focus();
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('listbox', { name: 'Suggestions' }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(outside).toHaveFocus();
+    expect(input).toHaveValue('c');
+    expect(updateMutateAsyncMock).not.toHaveBeenCalled();
+  });
+
   it('keeps suggestions visible while a replacement query is loading', async () => {
     settingsData.current = buildSettingsData();
     providerSetupData.current = buildProviderSetupData({
