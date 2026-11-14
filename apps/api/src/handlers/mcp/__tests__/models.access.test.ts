@@ -6,6 +6,7 @@ import {
   createAuthToken,
   configureAuthClientEnv,
   createMcpAccessToken,
+  getLegacyRoomoteMcpResourceUrl,
   getRoomoteMcpResourceUrl,
   ROOMOTE_MCP_SCOPE,
 } from '@roomote/auth';
@@ -20,7 +21,12 @@ import { Env } from '@roomote/env';
 import type { TaskModelOption } from '@roomote/types';
 import { createApiApp } from '../../../server';
 import { oauthGrantFixture } from './oauth-fixture';
-import { revokeMcpOAuthGrants } from '@roomote/redis';
+import { isMcpOAuthGrantLive, revokeMcpOAuthGrants } from '@roomote/redis';
+
+vi.mock('@roomote/redis', async (original) => {
+  const actual = await original<typeof import('@roomote/redis')>();
+  return { ...actual, isMcpOAuthGrantLive: vi.fn(actual.isMcpOAuthGrantLive) };
+});
 
 describe('model discovery through authenticated HTTP', () => {
   beforeAll(() => {
@@ -98,10 +104,14 @@ describe('model discovery through authenticated HTTP', () => {
     });
     const receipts: unknown[] = [];
     async function get(path: string, bearer: string | null = token) {
+      vi.mocked(isMcpOAuthGrantLive).mockClear();
       const response = await fetch(`${base}${path}`, {
         headers: bearer ? { Authorization: `Bearer ${bearer}` } : {},
       });
       const body = await response.json();
+      expect(
+        vi.mocked(isMcpOAuthGrantLive).mock.calls.length,
+      ).toBeLessThanOrEqual(1);
       receipts.push({
         method: 'GET',
         path,
@@ -163,6 +173,7 @@ describe('model discovery through authenticated HTTP', () => {
           arguments: { action: 'list_models', limit: 1, query: 'GPT' },
         },
       };
+      vi.mocked(isMcpOAuthGrantLive).mockClear();
       const result = await fetch(`${base}/mcp`, {
         method: 'POST',
         headers: {
@@ -177,7 +188,69 @@ describe('model discovery through authenticated HTTP', () => {
       expect(text).toContain(models[1]!.id);
       expect(text).not.toContain('Unknown action');
       expect(text).not.toContain('"isError":true');
+      expect(isMcpOAuthGrantLive).toHaveBeenCalledOnce();
+      const legacyResource = getLegacyRoomoteMcpResourceUrl(Env.TRPC_URL);
+      const legacy = await createMcpAccessToken({
+        ...(await oauthGrantFixture(member.id, legacyResource)),
+        userId: member.id,
+        resource: legacyResource,
+        scopes: [ROOMOTE_MCP_SCOPE],
+        timeoutMs: 60000,
+      });
+      const initialize = async (path: string, bearer: string) => {
+        vi.mocked(isMcpOAuthGrantLive).mockClear();
+        const response = await fetch(`${base}${path}`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${bearer}`,
+            'Content-Type': 'application/json',
+            Accept: 'application/json, text/event-stream',
+          },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 1,
+            method: 'initialize',
+            params: {
+              protocolVersion: '2025-03-26',
+              capabilities: {},
+              clientInfo: { name: 'auth-test', version: '1' },
+            },
+          }),
+        });
+        await response.text();
+        expect(isMcpOAuthGrantLive).toHaveBeenCalledOnce();
+        return response.status;
+      };
+      expect(await initialize('/api/mcp-routing/roomote', legacy)).toBe(200);
+      expect(vi.mocked(isMcpOAuthGrantLive).mock.calls[0]![0]).toMatchObject({
+        resource: legacyResource,
+      });
+      expect(await initialize('/mcp', legacy)).toBe(403);
+      expect((await get('/mcp/models', legacy)).response.status).toBe(403);
+      expect(
+        (await get('/mcp/task-outputs/download', legacy)).response.status,
+      ).toBe(403);
+      // A live-grant storage failure must not fall back to member access on any
+      // mounted OAuth surface, and the next request must try Redis again.
+      for (const path of ['/mcp/models', '/mcp/task-outputs/download']) {
+        vi.mocked(isMcpOAuthGrantLive).mockRejectedValueOnce(
+          new Error('Redis unavailable'),
+        );
+        expect((await get(path)).response.status).toBe(401);
+        expect(isMcpOAuthGrantLive).toHaveBeenCalledOnce();
+      }
+      for (const [path, bearer] of [
+        ['/mcp', token],
+        ['/api/mcp-routing/roomote', legacy],
+      ] as const) {
+        vi.mocked(isMcpOAuthGrantLive).mockRejectedValueOnce(
+          new Error('Redis unavailable'),
+        );
+        expect(await initialize(path, bearer)).toBe(401);
+      }
+      expect((await get('/mcp/models')).response.status).toBe(200);
       await revokeMcpOAuthGrants(member.id);
+      expect(await initialize('/api/mcp-routing/roomote', legacy)).toBe(401);
       expect((await get('/mcp/models')).response.status).toBe(401);
       expect((await get('/mcp/task-outputs/download')).response.status).toBe(
         401,
@@ -204,6 +277,11 @@ describe('model discovery through authenticated HTTP', () => {
       expect((await get('/mcp/task-outputs/download')).response.status).toBe(
         401,
       );
+      await db
+        .update(users)
+        .set({ deletedAt: new Date() })
+        .where(eq(users.id, member.id));
+      expect((await get('/mcp/models', reconnected)).response.status).toBe(401);
       receipts.push({
         method: 'POST',
         path: '/mcp',

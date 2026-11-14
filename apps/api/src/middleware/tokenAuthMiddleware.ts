@@ -16,6 +16,17 @@ import {
 
 import type { Variables } from '../types';
 
+// Only this middleware can publish a credential for this request. In particular,
+// setting authContext alone must not attest that an OAuth grant was checked.
+const authenticatedRequests = new WeakMap<
+  Context<{ Variables: Variables }>,
+  NonNullable<Variables['authContext']>
+>();
+
+export function getRequestAuth(c: Context<{ Variables: Variables }>) {
+  return authenticatedRequests.get(c);
+}
+
 async function deploymentAllowsTokenAuth(): Promise<boolean> {
   const deployment = await db.query.deploymentSettings.findFirst({
     where: eq(deploymentSettings.id, 'default'),
@@ -106,6 +117,7 @@ export const tokenAuthMiddleware = () =>
           // as that user is removed.
           if (!jobContext.userId || (user && user.deletedAt == null)) {
             c.set('authContext', jobContext);
+            authenticatedRequests.set(c, jobContext);
             isRunToken = true;
           }
         }
@@ -150,6 +162,7 @@ export const tokenAuthMiddleware = () =>
           // Removed users keep no standing access: their API tokens die with them.
           if (user && user.deletedAt == null) {
             c.set('authContext', userScopedAuth);
+            authenticatedRequests.set(c, userScopedAuth);
           }
         } catch (error) {
           console.error(

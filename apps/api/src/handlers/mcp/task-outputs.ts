@@ -21,6 +21,7 @@ import {
   asStringOrNull,
   taskOutputReadInputSchema,
   truncateAcpOutputText,
+  isUserToken,
 } from '@roomote/types';
 
 import type { Variables } from '../../types';
@@ -38,7 +39,10 @@ import { resolveRoomoteMemberAuth } from './roomote-member-auth';
 type MemberContext = Context<{ Variables: Variables & { mcpAuth: McpAuth } }>;
 
 async function requireReadableTask(taskId: string, auth: McpAuth) {
-  const member = await resolveRoomoteMemberAuth(auth.authContext);
+  // Tool invocations already carry the member identity resolved at ingress.
+  if (!auth.authContext || !isUserToken(auth.authContext))
+    throw new McpProxyError(403, 'Member access required');
+  const member = { ...auth, userId: auth.authContext.userId };
   const task = await db.query.tasks.findFirst({
     columns: { id: true },
     where: and(
@@ -234,7 +238,7 @@ export async function downloadMemberTaskArtifact(
 ): Promise<Response> {
   c.header('Cache-Control', 'private, no-store');
   try {
-    const auth = await resolveRoomoteMemberAuth(c.get('authContext'));
+    const auth = await resolveRoomoteMemberAuth(c);
     const input = z
       .object({
         taskId: z.string().regex(/^[0-9a-z]{13}$/),

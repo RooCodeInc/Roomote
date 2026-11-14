@@ -4,15 +4,42 @@ import { Env } from '@roomote/env';
 import type { TaskModelOption } from '@roomote/types';
 import type { Variables } from '../../../types';
 import { listMemberModels } from '../models';
+import { tokenAuthMiddleware } from '../../../middleware/tokenAuthMiddleware';
 
-const { options, grantLive } = vi.hoisted(() => ({
+const { options, grantLive, authState } = vi.hoisted(() => ({
   options: vi.fn(),
   grantLive: vi.fn(),
+  authState: { credential: undefined as Variables['authContext'] },
+}));
+vi.mock('@roomote/auth', async (original) => ({
+  ...(await original<typeof import('@roomote/auth')>()),
+  validateRunToken: vi.fn(async () => {
+    if (authState.credential?.tokenType === 'run') return authState.credential;
+    throw new Error('Not a run token');
+  }),
+  validateMcpAccessToken: vi.fn(async () => {
+    if (authState.credential?.tokenType === 'mcp') return authState.credential;
+    throw new Error('Not an OAuth token');
+  }),
+  validateAuthToken: vi.fn(async () => {
+    if (authState.credential?.tokenType === 'auth') return authState.credential;
+    throw new Error('Not a user token');
+  }),
 }));
 vi.mock('@roomote/redis', () => ({ isMcpOAuthGrantLive: grantLive }));
 vi.mock('@roomote/db/server', async (original) => ({
   ...(await original<typeof import('@roomote/db/server')>()),
   getDeploymentTaskModelOptions: options,
+  db: {
+    query: {
+      users: {
+        findFirst: vi.fn(async () => ({ id: 'member', deletedAt: null })),
+      },
+      deploymentSettings: {
+        findFirst: vi.fn(async () => ({ metadata: null })),
+      },
+    },
+  },
 }));
 
 const model = (id: string, displayName = id): TaskModelOption => ({
@@ -28,10 +55,12 @@ function app(
   },
 ) {
   const router = new Hono<{ Variables: Variables }>();
+  authState.credential = auth ?? undefined;
   router.use('*', async (c, next) => {
-    c.set('authContext', auth ?? undefined);
+    c.req.raw.headers.set('authorization', 'Bearer fixture');
     await next();
   });
+  router.use('*', tokenAuthMiddleware());
   router.get('/models', listMemberModels);
   return router;
 }
@@ -46,6 +75,25 @@ describe('member model discovery', () => {
           auth.clientId === 'fixture-client' &&
           auth.grantId === 'fixture-grant',
       );
+  });
+
+  it('does not trust an authContext installed without authenticated ingress', async () => {
+    const router = new Hono<{ Variables: Variables }>();
+    router.use('*', async (c, next) => {
+      c.set('authContext', {
+        userId: 'member',
+        tokenType: 'mcp',
+        version: 1,
+        resource: getRoomoteMcpResourceUrl(Env.R_PUBLIC_URL ?? Env.R_APP_URL),
+        scopes: [ROOMOTE_MCP_SCOPE],
+        clientId: 'fixture-client',
+        grantId: 'fixture-grant',
+      });
+      await next();
+    });
+    router.get('/models', listMemberModels);
+    expect((await router.request('/models')).status).toBe(401);
+    expect(options).not.toHaveBeenCalled();
   });
 
   it('bounds large catalogs and traverses IDs without gaps or duplicates', async () => {
