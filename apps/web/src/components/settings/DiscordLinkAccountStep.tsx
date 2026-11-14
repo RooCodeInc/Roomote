@@ -102,6 +102,17 @@ export function DiscordLinkAccountStep({
             If Discord blocks the DM, open the server&apos;s Privacy Settings
             and enable Direct Messages.
           </p>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={generate}
+            disabled={createLinkCode.isPending}
+          >
+            {createLinkCode.isPending
+              ? 'Generating code…'
+              : 'Generate new code'}
+          </Button>
         </>
       ) : createLinkCode.isPending ? (
         <p className="text-sm">Generating your Discord link…</p>
@@ -116,6 +127,11 @@ export function DiscordLinkAccountStep({
             Link your Discord account
           </Button>
         </>
+      )}
+      {createLinkCode.isError && (
+        <p role="alert" className="text-sm text-destructive">
+          Could not generate a link code. Please try again.
+        </p>
       )}
     </div>
   );

@@ -106,6 +106,21 @@ export function TelegramLinkAccountStep({
               </a>
             </Button>
           )}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={createTelegramLinkCode.isPending}
+            onClick={() =>
+              createTelegramLinkCode.mutate(undefined, {
+                onSuccess: (result) => setLinkCode(result),
+              })
+            }
+          >
+            {createTelegramLinkCode.isPending
+              ? 'Generating code…'
+              : 'Generate new code'}
+          </Button>
         </div>
       ) : createTelegramLinkCode.isPending ? (
         <p className="text-sm">Generating your Telegram link…</p>
@@ -132,6 +147,11 @@ export function TelegramLinkAccountStep({
               : 'Link your Telegram account'}
           </Button>
         </>
+      )}
+      {createTelegramLinkCode.isError && (
+        <p role="alert" className="text-sm text-destructive">
+          Could not generate a link code. Please try again.
+        </p>
       )}
     </div>
   );
