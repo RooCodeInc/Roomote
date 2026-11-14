@@ -9,8 +9,8 @@ Trace the full Roomote agent path before changing runtime code.
 
 ## Start Here
 
-- Read `packages/cloud-agents/src/server/cloud-job-queue.ts` for queue claim/release behavior.
-- Read `apps/controller/src/BaseController.ts` and `apps/controller/src/orphaned-cloud-jobs.ts` for dispatch and recovery.
+- Read `packages/cloud-agents/src/server/task-run-queue.ts` for queue claim/release behavior.
+- Read `apps/controller/src/BaseController.ts` and `apps/controller/src/orphaned-task-runs.ts` for dispatch and recovery.
 - Read `apps/worker/src/run-task/*` and `apps/worker/src/commands/*` for worker execution and harness startup.
 - Read `packages/cloud-agents/src/system-prompt.ts` and `packages/cloud-agents/src/server/workflows/` for prompt assembly and workflow builders.
 
@@ -41,9 +41,9 @@ harness behavior with the currently checked-in repo surfaces.
 ## Read By Problem
 
 - Queueing, claim/release, orphan recovery:
-  - `packages/cloud-agents/src/server/cloud-job-queue.ts`
+  - `packages/cloud-agents/src/server/task-run-queue.ts`
   - `apps/controller/src/BaseController.ts`
-  - `apps/controller/src/orphaned-cloud-jobs.ts`
+  - `apps/controller/src/orphaned-task-runs.ts`
 - Worker execution and harness startup:
   - `apps/worker/src/commands/*`
   - `apps/worker/src/run-task/*`
@@ -63,7 +63,7 @@ harness behavior with the currently checked-in repo surfaces.
 
 - Docker is the default worker compute provider for Roomote local and self-hosted deployments.
 - Hosted compute providers should preserve the sandbox-compatible API/contract surface used by Docker, Vercel Sandbox, and Modal-backed workers.
-- Local preview-proxy runs on port `8081`.
+- Local development exposes the preview proxy on port `18081` by default (`ROOMOTE_PREVIEW_PROXY_PORT` can override it); the proxy's internal/container default is `8081`.
 - Webhook mounts are under `/api/webhooks/*`.
 - GitHub MCP is router-side today. The worker-side integration catalog is no
   longer just Linear; treat `packages/types/src/mcp-oauth.ts` as the source of
