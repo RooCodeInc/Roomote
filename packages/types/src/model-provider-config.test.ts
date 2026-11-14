@@ -521,16 +521,11 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       },
       {
         displayName: 'Claude Fable 5.1',
-        expected: [
-          ['roomote', 'roomote/anthropic/claude-fable-5.1'],
-          ['openrouter', 'openrouter/anthropic/claude-fable-5.1'],
-          ['vercel', 'vercel/anthropic/claude-fable-5.1'],
-          ['requesty', 'requesty/claude-fable-5.1'],
-          ['anthropic', 'anthropic/claude-fable-5-1'],
-          ['opencode', 'opencode/claude-fable-5-1'],
-          ['amazon-bedrock', 'bedrock-mantle/anthropic.claude-fable-5-1'],
-          ['github-copilot', 'github-copilot/claude-fable-5.1'],
-        ],
+        expected: [['github-copilot', 'github-copilot/claude-fable-5.1']],
+      },
+      {
+        displayName: 'Claude Fable 5',
+        expected: [['github-copilot', 'github-copilot/claude-fable-5']],
       },
       {
         displayName: 'Claude Opus 5.5',
@@ -1250,8 +1245,6 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       requestyProvider?.suggestedTaskModels.map((model) => model.id),
     ).toEqual([
       'requesty/anthropic/claude-fable-5.2',
-      'requesty/claude-fable-5.1',
-      'requesty/claude-fable-5',
       'requesty/anthropic/claude-haiku-5-5',
       'requesty/anthropic/claude-opus-5-5',
       'requesty/anthropic/claude-sonnet-5-5',

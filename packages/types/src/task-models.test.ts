@@ -262,6 +262,36 @@ describe('task model settings', () => {
     ]);
   });
 
+  it.each([
+    'roomote/anthropic/claude-fable-5',
+    'roomote/anthropic/claude-fable-5.1',
+    'openrouter/anthropic/claude-fable-5',
+    'openrouter/anthropic/claude-fable-5.1',
+    'vercel/anthropic/claude-fable-5',
+    'vercel/anthropic/claude-fable-5.1',
+    'requesty/claude-fable-5',
+    'requesty/claude-fable-5.1',
+    'anthropic/claude-fable-5',
+    'anthropic/claude-fable-5-1',
+    'opencode/claude-fable-5',
+    'opencode/claude-fable-5-1',
+    'bedrock-mantle/anthropic.claude-fable-5',
+    'bedrock-mantle/anthropic.claude-fable-5-1',
+  ])('keeps a saved superseded Fable enabled and selected: %s', (modelId) => {
+    const settings = normalizeTaskModelSettings({
+      models: [
+        buildTaskModelOption({ id: modelId, displayName: 'Saved Fable' }),
+      ],
+      allowedModelIds: [modelId],
+      defaultModelId: modelId,
+    });
+
+    expect(getEnabledTaskModels(settings).map((model) => model.id)).toEqual([
+      modelId,
+    ]);
+    expect(getDefaultTaskModelId(settings)).toBe(modelId);
+  });
+
   it('removes disabled direct-provider models from persisted settings', () => {
     const settings = normalizeTaskModelSettings({
       models: [
