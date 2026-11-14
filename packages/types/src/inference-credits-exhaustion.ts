@@ -69,6 +69,9 @@ const CREDITS_EXHAUSTED_TEXT_PATTERNS: readonly RegExp[] = [
   // OpenRouter.
   /\brequires more credits\b/u,
   /\binsufficient credits\b/u,
+  // Compatible gateways can reject a lifetime free-trial allowance as 403.
+  // Require the lifetime qualifier so a daily trial limit stays temporary.
+  /\bfree trial used up\b[^\n]*\btokens lifetime\b/u,
   // Roomote inference gateway.
   /\broomote inference credits are exhausted\b/u,
 ];
