@@ -200,6 +200,7 @@ async function assertValidWorkerTrpcResponse(
     return;
   }
 
+  await response.body?.cancel().catch(() => undefined);
   throw new Error(
     `Worker callback tRPC endpoint ${requestUrl} returned non-JSON content-type ${
       contentType ? JSON.stringify(contentType) : '"missing"'
@@ -303,7 +304,7 @@ export function createWorkerFetchWithRetry(
       signal: init?.signal,
       getDelayMs: (attemptNumber) =>
         getWorkerQueryRetryDelayMs(attemptNumber, baseDelayMs),
-      shouldRetry: ({ error, result }) => {
+      shouldRetry: async ({ error, result }) => {
         if (error) {
           return true;
         }
@@ -314,10 +315,13 @@ export function createWorkerFetchWithRetry(
 
         const contentType = result.headers.get('content-type');
 
-        return (
+        const retry =
           shouldRetryWorkerQueryResponse(result.status) ||
-          !isJsonContentType(contentType)
-        );
+          !isJsonContentType(contentType);
+        if (retry) {
+          await result.body?.cancel().catch(() => undefined);
+        }
+        return retry;
       },
     });
 
