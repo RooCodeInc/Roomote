@@ -918,7 +918,7 @@ Severity: Medium / Low
 
 NOTE: `npm audit` often returns a large number of insignificant "vulnerabilities" which do not actually matter. You should only focus on Express or other extremely critical packages, ignoring ones listed in dev tools, bundlers, etc.
 
-Do not upgrade packages without concent from the user. This may break existing code in unexpected ways. Instead, inform them of the outdated packages.
+Do not upgrade packages without consent from the user. This may break existing code in unexpected ways. Instead, inform them of the outdated packages.
 
 Required:
 
