@@ -25,8 +25,15 @@ abs_path() {
   fi
 
   local dir
-  dir="$(cd -- "$(dirname -- "$path")" && pwd)"
-  printf '%s/%s\n' "$dir" "$(basename -- "$path")"
+  if dir="$(cd -- "$(dirname -- "$path")" 2>/dev/null && pwd)"; then
+    printf '%s/%s\n' "$dir" "$(basename -- "$path")"
+  else
+    # Output and state directories may have multiple not-yet-created parents.
+    case "$path" in
+      /*) printf '%s\n' "$path" ;;
+      *) printf '%s/%s\n' "$PWD" "$path" ;;
+    esac
+  fi
 }
 
 state_root() {
