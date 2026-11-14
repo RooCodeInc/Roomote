@@ -4,7 +4,7 @@ import {
   ORPHANED_PENDING_THRESHOLD_MS,
   WAITING_FOR_SANDBOX_PROVIDER_TASK_PHASE,
 } from '@roomote/types';
-import { type TaskRun, db, taskRuns, eq, sql } from '@roomote/db/server';
+import { type TaskRun, db, taskRuns, asc, eq, sql } from '@roomote/db/server';
 import {
   releaseTaskRun,
   removeTaskRunQueueEntry,
@@ -13,6 +13,41 @@ import {
 const SECOND = 1000;
 const MINUTE = 60 * SECOND;
 const HOUR = 60 * MINUTE;
+
+const orphanedTaskRunCondition = sql`
+  cancel_requested_at IS NULL
+  AND canceled_at IS NULL
+  AND (
+    (
+      status = ${RunStatus.Pending}
+      AND task_phase IS DISTINCT FROM ${WAITING_FOR_SANDBOX_PROVIDER_TASK_PHASE}
+      AND created_at < NOW() - (${ORPHANED_PENDING_THRESHOLD_MS} * INTERVAL '1 millisecond')
+      AND created_at > NOW() - (${24 * HOUR} * INTERVAL '1 millisecond')
+    )
+    OR
+    (
+      status = ${RunStatus.Dequeued}
+      AND dequeued_at < NOW() - (${ORPHANED_AFTER_DEQUEUE_THRESHOLD_MS} * INTERVAL '1 millisecond')
+    )
+  )
+`;
+
+/** Inspect the oldest 100 candidates without claiming a lease or touching Redis. */
+export async function listOrphanedTaskRuns() {
+  return db
+    .select({
+      id: taskRuns.id,
+      taskId: taskRuns.taskId,
+      status: taskRuns.status,
+      taskPhase: taskRuns.taskPhase,
+      createdAt: taskRuns.createdAt,
+      dequeuedAt: taskRuns.dequeuedAt,
+    })
+    .from(taskRuns)
+    .where(orphanedTaskRunCondition)
+    .orderBy(asc(taskRuns.createdAt))
+    .limit(100);
+}
 
 /**
  * Claims one stale task run in PostgreSQL before returning it to the
@@ -26,21 +61,7 @@ async function claimOrphanedTaskRun(): Promise<TaskRun | null> {
       WITH candidate AS (
         SELECT id
         FROM task_runs
-        WHERE cancel_requested_at IS NULL
-          AND canceled_at IS NULL
-          AND (
-          (
-            status = ${RunStatus.Pending}
-            AND task_phase IS DISTINCT FROM ${WAITING_FOR_SANDBOX_PROVIDER_TASK_PHASE}
-            AND created_at < NOW() - (${ORPHANED_PENDING_THRESHOLD_MS} * INTERVAL '1 millisecond')
-            AND created_at > NOW() - (${24 * HOUR} * INTERVAL '1 millisecond')
-          )
-          OR
-          (
-            status = ${RunStatus.Dequeued}
-            AND dequeued_at < NOW() - (${ORPHANED_AFTER_DEQUEUE_THRESHOLD_MS} * INTERVAL '1 millisecond')
-          )
-        )
+        WHERE ${orphanedTaskRunCondition}
         ORDER BY created_at ASC
         FOR UPDATE SKIP LOCKED
         LIMIT 1
