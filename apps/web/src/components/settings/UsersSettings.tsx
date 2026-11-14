@@ -27,6 +27,7 @@ import {
   LucideLink,
   Mails,
   RotateCcwKey,
+  RetryableLoadError,
   ScrollText,
   Select,
   SelectContent,
@@ -40,6 +41,7 @@ import {
 } from '@/components/system';
 import { Section } from '@/components/settings';
 import { AccountLinkHelpSection } from './AccountLinkHelpSection';
+import { UserMcpClients } from './ConnectedMcpClients';
 import { formatDistanceToNow } from 'date-fns';
 
 const LICENSE_PURCHASE_URL =
@@ -230,16 +232,17 @@ export function UsersSettings() {
     }),
   );
 
-  if (settingsQuery.isPending) {
+  if (settingsQuery.isPending && settingsQuery.errorUpdatedAt === 0) {
     return <Skeleton className="h-64 w-full" />;
   }
 
-  if (settingsQuery.isError || !settingsQuery.data) {
+  if (!settingsQuery.data) {
     return (
-      <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-        <AlertCircle className="mt-0.5 size-4 shrink-0" />
-        <p>Failed to load user settings.</p>
-      </div>
+      <RetryableLoadError
+        message="Could not load user settings."
+        isRetrying={settingsQuery.isFetching}
+        onRetry={() => void settingsQuery.refetch()}
+      />
     );
   }
 
@@ -956,6 +959,7 @@ export function UsersSettings() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <UserMcpClients users={members} />
     </div>
   );
 }

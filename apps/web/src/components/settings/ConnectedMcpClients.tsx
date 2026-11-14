@@ -185,16 +185,13 @@ export function ConnectedMcpClients({
   );
 }
 
-export function UserMcpClients() {
-  const trpc = useTRPC();
-  const users = useQuery(trpc.accessPolicy.get.queryOptions());
+export function UserMcpClients({
+  users,
+}: {
+  users: { id: string; name: string; email: string }[];
+}) {
   const [selected, setSelected] = useState('');
-  if (users.isPending) return <Skeleton className="h-20 w-full" />;
-  if (users.isError)
-    return <ErrorState title="Could not load users’ MCP clients" />;
-  const user =
-    users.data.users.find((entry) => entry.id === selected) ??
-    users.data.users[0];
+  const user = users.find((entry) => entry.id === selected) ?? users[0];
   if (!user) return null;
   return (
     <div className="space-y-4">
@@ -207,7 +204,7 @@ export function UserMcpClients() {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {users.data.users.map((entry) => (
+            {users.map((entry) => (
               <SelectItem key={entry.id} value={entry.id}>
                 {entry.name} ({entry.email})
               </SelectItem>
