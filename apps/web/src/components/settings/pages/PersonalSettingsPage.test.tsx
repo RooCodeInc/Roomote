@@ -70,7 +70,7 @@ describe('PersonalSettingsPage', () => {
 
     expect(screen.getByText('User profile')).toBeInTheDocument();
     expect(userProfileSectionMock).toHaveBeenCalledWith(
-      { canChangePassword: true, profile },
+      { canChangeEmail: false, canChangePassword: true, profile },
       undefined,
     );
     expect(screen.getByText('Change password')).toBeInTheDocument();
@@ -93,7 +93,7 @@ describe('PersonalSettingsPage', () => {
     );
 
     expect(userProfileSectionMock).toHaveBeenCalledWith(
-      { canChangePassword: false, profile },
+      { canChangeEmail: false, canChangePassword: false, profile },
       undefined,
     );
     expect(screen.getByText('Change password')).toBeInTheDocument();

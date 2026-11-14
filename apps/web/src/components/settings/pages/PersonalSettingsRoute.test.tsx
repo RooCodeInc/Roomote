@@ -2,6 +2,7 @@ import { render } from '@testing-library/react';
 
 let accountCapabilities:
   | {
+      canChangeEmail?: boolean;
       canChangePassword: boolean;
       canSetPassword: boolean;
     }
@@ -63,6 +64,7 @@ describe('PersonalSettingsRoute', () => {
           imageUrl: 'https://example.com/ada.png',
           name: 'Ada Lovelace',
         },
+        canChangeEmail: false,
       },
       undefined,
     );
