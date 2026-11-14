@@ -1,3 +1,4 @@
+import { createServer, type RequestListener } from 'node:http';
 import { execa } from 'execa';
 
 import { runDoctor } from '../doctor';
@@ -7,6 +8,7 @@ vi.mock('execa', () => ({
 }));
 
 const originalFetch = global.fetch;
+const originalTimeout = AbortSignal.timeout;
 const originalEnv = process.env;
 const mockedExeca = execa as unknown as {
   mockImplementation: (
@@ -175,6 +177,28 @@ function mockExeca({
   });
 }
 
+async function withHttpProbeServer(
+  handler: RequestListener,
+  check: (origin: string) => Promise<void>,
+) {
+  const server = createServer(handler);
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('Missing port');
+  const timeout = vi.spyOn(AbortSignal, 'timeout').mockImplementation((ms) => {
+    expect(ms).toBe(5_000);
+    return originalTimeout(100);
+  });
+  try {
+    await check(`http://127.0.0.1:${address.port}`);
+  } finally {
+    timeout.mockRestore();
+    global.fetch = originalFetch;
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+}
+
 describe('runDoctor', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -192,6 +216,142 @@ describe('runDoctor', () => {
     const checks = await runDoctor();
 
     expect(checks.every((check) => check.status === 'pass')).toBe(true);
+  });
+
+  it('reports a stalled endpoint while preserving healthy siblings and closing unused bodies', async () => {
+    let closed = 0;
+    await withHttpProbeServer(
+      (request, response) => {
+        response.on('close', () => {
+          closed++;
+        });
+        if (request.url !== '/sign-in') {
+          response.writeHead(200);
+          response.write('healthy headers, unfinished body');
+        }
+      },
+      async (origin) => {
+        global.fetch = (input, init) =>
+          originalFetch(new URL(new URL(String(input)).pathname, origin), init);
+        const checks = await runDoctor();
+        expect(checks).toContainEqual(
+          expect.objectContaining({
+            name: 'web sign-in',
+            status: 'fail',
+            detail: expect.stringContaining('timeout'),
+          }),
+        );
+        expect(
+          checks.filter(
+            (check) =>
+              check.detail.startsWith('http://localhost:') &&
+              check.status === 'pass',
+          ),
+        ).toHaveLength(6);
+        await vi.waitFor(() => expect(closed).toBe(7));
+      },
+    );
+  });
+
+  it.each(['headers', 'body'] as const)(
+    'warns when Teams token %s stall, then completes the remaining probes',
+    async (stall) => {
+      mockExeca({
+        extraWebEnv: {
+          R_TEAMS_BOT_APP_ID: 'local-test-app',
+          R_TEAMS_BOT_APP_PASSWORD: 'local-test-password',
+          R_TEAMS_BOT_TOKEN_ENDPOINT:
+            'https://teams.example.test/oauth2/v2.0/token',
+        },
+      });
+      await withHttpProbeServer(
+        (request, response) => {
+          if (request.url === '/oauth2/v2.0/token') {
+            if (stall === 'body') {
+              response.writeHead(200, { 'content-type': 'application/json' });
+              response.write('{"access_token":');
+            }
+            return;
+          }
+          response.writeHead(request.url === '/api/webhooks/teams' ? 401 : 200);
+          response.end('{}');
+        },
+        async (origin) => {
+          global.fetch = (input, init) =>
+            originalFetch(
+              new URL(new URL(String(input)).pathname, origin),
+              init,
+            );
+          const checks = await runDoctor();
+          expect(checks).toContainEqual(
+            expect.objectContaining({
+              name: 'Teams Azure Bot token',
+              status: 'warn',
+            }),
+          );
+          expect(checks).toContainEqual(
+            expect.objectContaining({
+              name: 'Teams app callback',
+              status: 'pass',
+            }),
+          );
+          expect(
+            checks.filter(
+              (check) =>
+                check.detail.startsWith('http://localhost:') &&
+                check.status === 'pass',
+            ),
+          ).toHaveLength(7);
+        },
+      );
+    },
+  );
+
+  it('warns when the Teams callback stalls without hiding endpoint results', async () => {
+    mockExeca({
+      extraWebEnv: {
+        R_TEAMS_BOT_APP_ID: 'local-test-app',
+        R_TEAMS_BOT_APP_PASSWORD: 'local-test-password',
+        R_TEAMS_BOT_TOKEN_ENDPOINT:
+          'https://teams.example.test/oauth2/v2.0/token',
+      },
+    });
+    await withHttpProbeServer(
+      (request, response) => {
+        if (request.url === '/api/webhooks/teams') return;
+        response.writeHead(200, { 'content-type': 'application/json' });
+        response.end(
+          request.url === '/oauth2/v2.0/token'
+            ? '{"access_token":"local-test-token"}'
+            : '{}',
+        );
+      },
+      async (origin) => {
+        global.fetch = (input, init) =>
+          originalFetch(new URL(new URL(String(input)).pathname, origin), init);
+        const checks = await runDoctor();
+        expect(checks).toContainEqual(
+          expect.objectContaining({
+            name: 'Teams Azure Bot token',
+            status: 'pass',
+          }),
+        );
+        expect(checks).toContainEqual(
+          expect.objectContaining({
+            name: 'Teams app callback',
+            status: 'warn',
+            detail: expect.stringContaining('timeout'),
+          }),
+        );
+        expect(
+          checks.filter(
+            (check) =>
+              check.detail.startsWith('http://localhost:') &&
+              check.status === 'pass',
+          ),
+        ).toHaveLength(7);
+      },
+    );
   });
 
   it('reads PM2 process env values from the top-level PM2 payload', async () => {

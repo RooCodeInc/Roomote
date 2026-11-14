@@ -48,6 +48,7 @@ const DEFAULT_ROOMOTE_WEB_PORT = '13000';
 const DEFAULT_ROOMOTE_API_PORT = '13001';
 const DEFAULT_ROOMOTE_BULLMQ_PORT = '13002';
 const DEFAULT_ROOMOTE_PREVIEW_PROXY_PORT = '18081';
+const HTTP_CHECK_TIMEOUT_MS = 5_000;
 const TEAMS_BOT_ENV_KEYS = [
   'R_TEAMS_BOT_APP_ID',
   'R_TEAMS_BOT_APP_PASSWORD',
@@ -306,7 +307,10 @@ async function checkEndpoint({
   url: string;
 }): Promise<DoctorCheck> {
   try {
-    const response = await fetch(url);
+    const response = await fetch(url, {
+      signal: AbortSignal.timeout(HTTP_CHECK_TIMEOUT_MS),
+    });
+    await response.body?.cancel().catch(() => {});
 
     if (!response.ok) {
       return {
@@ -689,6 +693,7 @@ async function checkTeamsBotTokenExchange(
 
   try {
     const response = await fetch(endpoint, {
+      signal: AbortSignal.timeout(HTTP_CHECK_TIMEOUT_MS),
       method: 'POST',
       headers: {
         'content-type': 'application/x-www-form-urlencoded',
@@ -794,10 +799,12 @@ async function checkTeamsAppCallback(
 
   try {
     const response = await fetch(callbackUrl.toString(), {
+      signal: AbortSignal.timeout(HTTP_CHECK_TIMEOUT_MS),
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: '{}',
     });
+    await response.body?.cancel().catch(() => {});
 
     if (response.status !== 400 && response.status !== 401) {
       return {
