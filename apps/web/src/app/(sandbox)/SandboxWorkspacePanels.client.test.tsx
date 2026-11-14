@@ -340,6 +340,7 @@ describe('ResponsiveWorkspacePanels', () => {
         fireEvent.keyDown(separator, { key: 'ArrowRight' });
         expect(animate).toHaveBeenCalledTimes(calls);
         expect(separator.getAttribute('aria-valuenow')).not.toBe(before);
+        if (kind === 'pointer') fireEvent.pointerUp(window);
       },
     );
 
