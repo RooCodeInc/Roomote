@@ -9,6 +9,7 @@ import {
   waitFor,
 } from '@testing-library/react';
 import { useState } from 'react';
+import { toast } from 'sonner';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   SETUP_RECEIPT_INPUT_KIND,
@@ -5501,5 +5502,79 @@ describe('FastSessionTranscript', () => {
       }),
     );
     expect(replyMutate).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [new Error('Failed to fetch'), 'Failed to fetch'],
+    [null, 'Try again shortly.'],
+  ])(
+    'reports a rejected goal start and retains the same draft for retry (%s)',
+    async (error, description) => {
+      const toastError = vi.spyOn(toast, 'error');
+      try {
+        startGoalMutate.mockRejectedValueOnce(error);
+        render(
+          <FastSessionTranscript
+            sessionId="session-1"
+            initialMessages={[]}
+            canReply
+          />,
+        );
+
+        const input = screen.getByPlaceholderText('Message agent');
+        fireEvent.change(input, {
+          target: { value: '/goal ship the release' },
+        });
+        fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
+
+        await waitFor(() =>
+          expect(toastError).toHaveBeenCalledWith('Could not start the goal.', {
+            description,
+          }),
+        );
+        expect(input).toHaveValue('/goal ship the release');
+        expect(replyMutate).not.toHaveBeenCalled();
+
+        fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
+        await waitFor(() => expect(startGoalMutate).toHaveBeenCalledTimes(2));
+        expect(startGoalMutate).toHaveBeenLastCalledWith({
+          sessionId: 'session-1',
+          objective: 'ship the release',
+        });
+        await waitFor(() => expect(input).toHaveValue(''));
+        expect(replyMutate).not.toHaveBeenCalled();
+      } finally {
+        toastError.mockRestore();
+      }
+    },
+  );
+
+  it('keeps a handled goal-start error and its draft instead of showing transport feedback', async () => {
+    const toastError = vi.spyOn(toast, 'error');
+    try {
+      startGoalMutate.mockResolvedValueOnce({
+        success: false,
+        error: 'A goal is already active.',
+      });
+      render(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[]}
+          canReply
+        />,
+      );
+      const input = screen.getByPlaceholderText('Message agent');
+      fireEvent.change(input, { target: { value: '/goal ship the release' } });
+      fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
+
+      await waitFor(() =>
+        expect(toastError).toHaveBeenCalledWith('A goal is already active.'),
+      );
+      expect(toastError).toHaveBeenCalledTimes(1);
+      expect(input).toHaveValue('/goal ship the release');
+      expect(replyMutate).not.toHaveBeenCalled();
+    } finally {
+      toastError.mockRestore();
+    }
   });
 });
