@@ -50,6 +50,7 @@ const state = vi.hoisted(() => ({
   realWebhookQuery: null as
     | null
     | (() => Promise<{ enabled: boolean; url: string | null }>),
+  realSettingsQuery: null as null | (() => Promise<unknown>),
   builtInAutomationWebhookPending: false,
   builtInAutomationWebhookError: false,
   builtInAutomationWebhookFetching: false,
@@ -414,6 +415,13 @@ vi.mock('@tanstack/react-query', () => ({
   useQuery: (queryOptions: { queryKey?: unknown[] }) => {
     state.queriedKeys.push(queryOptions.queryKey);
     const key1 = queryOptions.queryKey?.[1];
+    if (key1 === 'getSettings' && state.realSettingsQuery) {
+      return actualQuery.useQuery({
+        queryKey: queryOptions.queryKey!,
+        queryFn: state.realSettingsQuery,
+        retry: false,
+      });
+    }
     if (key1 === 'getCustomAutomationOptions') {
       const managerSlackChannelId =
         state.settingsQuery.data.settings.managerSlackChannelId;
@@ -1078,6 +1086,7 @@ describe('AutomationsSettings', () => {
     state.customAutomationWebhookSettings = null;
     state.builtInAutomationWebhookFallback = { enabled: false, url: null };
     state.realWebhookQuery = null;
+    state.realSettingsQuery = null;
     state.builtInAutomationWebhookRefetch.mockResolvedValue(undefined);
     state.builtInAutomationWebhookPending = false;
     state.builtInAutomationWebhookError = false;
@@ -1229,6 +1238,110 @@ describe('AutomationsSettings', () => {
     expect(screen.getByLabelText('Additional instructions')).toHaveValue(
       'Focus on authorization boundaries.',
     );
+  });
+
+  it('recovers a failed initial settings read with a stable Retry through real query transitions', async () => {
+    const data = state.settingsQuery.data;
+    let finishRetry!: (value: typeof data) => void;
+    const query = vi
+      .fn<() => Promise<typeof data>>()
+      .mockRejectedValueOnce(new Error('initial failure'))
+      .mockRejectedValueOnce(new Error('still unavailable'))
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishRetry = resolve;
+          }),
+      );
+    state.realSettingsQuery = query;
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: 0 } },
+    });
+    render(
+      <QueryClientProvider client={client}>
+        <AutomationsSettings />
+      </QueryClientProvider>,
+    );
+
+    const retry = await screen.findByRole('button', {
+      name: 'Retry loading built-in automation settings',
+    });
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Could not load built-in automation settings.',
+    );
+    expect(
+      screen.queryByRole('button', {
+        name: /(?:Set up|Configure) Manager Stats/,
+      }),
+    ).not.toBeInTheDocument();
+    // The independent custom-automation journey remains available.
+    expect(screen.getByRole('button', { name: 'New' })).toBeEnabled();
+    fireEvent.click(retry);
+    await waitFor(() => expect(query).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(retry).toBeEnabled());
+    fireEvent.click(retry);
+    await waitFor(() => expect(query).toHaveBeenCalledTimes(3));
+    expect(
+      screen.getByRole('button', {
+        name: 'Retry loading built-in automation settings',
+      }),
+    ).toBe(retry);
+    expect(retry).toBeDisabled();
+    expect(retry).toHaveAttribute('aria-busy', 'true');
+    fireEvent.click(retry);
+    expect(query).toHaveBeenCalledTimes(3);
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Could not load built-in automation settings.',
+    );
+
+    await act(async () => finishRetry(data));
+    expect(
+      await screen.findByRole('button', {
+        name: /(?:Set up|Configure) Manager Stats/,
+      }),
+    ).toBeEnabled();
+    expect(
+      screen.queryByText('Could not load built-in automation settings.'),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText(/^Default destination:/)).toBeInTheDocument();
+    client.clear();
+  });
+
+  it('keeps cached settings and an open instruction draft after a background read fails', async () => {
+    state.settingsQuery.data.reviewer.enabled = true;
+    state.settingsQuery.data.settings.reviewer.enabled = true;
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce(state.settingsQuery.data)
+      .mockRejectedValueOnce(new Error('refresh failed'));
+    state.realSettingsQuery = query;
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: 0 } },
+    });
+    render(
+      <QueryClientProvider client={client}>
+        <AutomationsSettings />
+      </QueryClientProvider>,
+    );
+    await screen.findByRole('button', {
+      name: /(?:Set up|Configure) Review Code/,
+    });
+    await openReviewerCard();
+    const input = screen.getByLabelText('Additional instructions');
+    fireEvent.change(input, { target: { value: 'Keep this review draft.' } });
+
+    await act(async () =>
+      client.refetchQueries({ queryKey: ['automations', 'getSettings'] }),
+    );
+    expect(query).toHaveBeenCalledTimes(2);
+    expect(input).toHaveValue('Keep this review draft.');
+    expect(
+      screen.getByRole('dialog', { name: 'Review Code' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText('Could not load built-in automation settings.'),
+    ).not.toBeInTheDocument();
+    client.clear();
   });
 
   it('explains that GitHub controls whether the review check is required', async () => {
