@@ -3037,6 +3037,16 @@ export function classifyNonTaskInferenceError(
     };
   }
 
+  // The SDK marks credential rejections non-retryable too. Preserve their
+  // specific category so pre-save validation can reject a known-bad key.
+  if (!gatewayBlocked && (statusCode === 401 || statusCode === 403)) {
+    return {
+      message: 'The inference provider rejected these credentials.',
+      reason: 'invalid_credentials',
+      retryable: false,
+    };
+  }
+
   if (isInferenceErrorExplicitlyNonRetryable(inferenceError)) {
     return {
       message: 'The inference provider rejected the request.',
@@ -3105,14 +3115,6 @@ export function classifyNonTaskInferenceError(
     return {
       message: 'The inference provider rejected the request.',
       reason: 'provider_error',
-      retryable: false,
-    };
-  }
-
-  if (statusCode === 401 || statusCode === 403) {
-    return {
-      message: 'The inference provider rejected these credentials.',
-      reason: 'invalid_credentials',
       retryable: false,
     };
   }
