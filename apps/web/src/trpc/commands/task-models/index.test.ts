@@ -2025,6 +2025,36 @@ describe('task model provider commands', () => {
     expect(option?.metadata).toEqual(model?.metadata);
   });
 
+  it.each(['anthropic/claude-fable-5', 'anthropic/claude-fable-5-1'])(
+    'keeps saved %s enabled and selected after recommendation replacement',
+    async (modelId) => {
+      mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
+        'ANTHROPIC_API_KEY',
+      ]);
+      mockFindDeploymentSettings.mockResolvedValue({
+        taskModelSettings: {
+          models: [
+            { id: modelId, displayName: 'Saved Fable', family: 'Fable' },
+          ],
+          allowedModelIds: [modelId],
+          defaultModelId: modelId,
+        },
+        runtimeModelConfig: { roomoteSmallModel: modelId },
+      });
+
+      const result = await getTaskModelSettingsCommand(buildMockAuth());
+      expect(result.models.find((model) => model.id === modelId)).toMatchObject(
+        {
+          enabled: true,
+        },
+      );
+      expect(result.runtimeModels.codingModel.effectiveModelId).toBe(modelId);
+      expect(result.helperModelOptions.map((option) => option.id)).toContain(
+        modelId,
+      );
+    },
+  );
+
   it('lists env-only coding overrides in the settings catalog', async () => {
     mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
       'OPENROUTER_API_KEY',
@@ -2249,21 +2279,19 @@ describe('task model provider commands', () => {
     expect(
       seededSettings?.models.map((model: { id: string }) => model.id),
     ).toEqual([
-      'anthropic/claude-fable-5',
-      'anthropic/claude-fable-5-1',
+      'anthropic/claude-fable-5-2',
       'anthropic/claude-haiku-5-5',
       'anthropic/claude-opus-5-5',
       'anthropic/claude-sonnet-5-5',
     ]);
     expect([...seededSettings.allowedModelIds].sort()).toEqual([
-      'anthropic/claude-fable-5',
-      'anthropic/claude-fable-5-1',
+      'anthropic/claude-fable-5-2',
       'anthropic/claude-haiku-5-5',
       'anthropic/claude-opus-5-5',
       'anthropic/claude-sonnet-5-5',
     ]);
     expect(seededSettings?.defaultModelId).toBe('anthropic/claude-sonnet-5-5');
-    expect(result.addedRecommendedModelCount).toBe(5);
+    expect(result.addedRecommendedModelCount).toBe(4);
 
     expect(
       result.providerSetup.providers.find(
@@ -2418,7 +2446,7 @@ describe('task model provider commands', () => {
     expect(modelIds).toContain('openrouter/openai/gpt-5.6-terra');
     expect(modelIds).toContain('anthropic/claude-sonnet-5-5');
     expect(seededSettings?.defaultModelId).toBe(DEFAULT_TASK_MODEL_ID);
-    expect(result.addedRecommendedModelCount).toBe(5);
+    expect(result.addedRecommendedModelCount).toBe(4);
   });
 
   it('does not reseed models when the provider already has configured models', async () => {

@@ -67,8 +67,8 @@ These connections use metered API billing or a provider-managed gateway:
 
 | Provider | Credential | Cost source |
 | --- | --- | --- |
-| [Amazon Bedrock](/providers/inference/amazon-bedrock) | Mantle API key and optional AWS region | AWS account |
-| [Anthropic](/providers/inference/anthropic) | Anthropic API key | Anthropic API organization |
+| <IntegrationName href="/providers/inference/amazon-bedrock" icon="bedrock" name="Amazon Bedrock" /> | Mantle API key and optional AWS region | AWS account |
+| <IntegrationName href="/providers/inference/anthropic" icon="anthropic" name="Anthropic" /> | Anthropic API key | Anthropic API organization |
 | <IntegrationName href="/providers/inference/azure-foundry" icon="azure" name="Azure AI Foundry" /> | Azure AI Services API key and resource name | Azure subscription |
 | <IntegrationName href="/providers/inference/azure-openai" icon="azure" name="Azure OpenAI" /> | Azure OpenAI API key and resource name | Azure subscription |
 | [Baseten](/providers/inference/baseten) | Baseten API key | Baseten workspace |
@@ -134,6 +134,33 @@ catalog-backed provider: recommendations you have not enabled appear toggled
 off, and they cannot be deleted while their provider stays connected — turn a
 model off to stop using it. To go beyond the recommended set, add any model by
 its slug from the add-model field.
+
+### Claude Fable 5.2
+
+**Claude Fable 5.2** is recommended through Roomote inference and these providers:
+
+| Provider | Full task model ID |
+| --- | --- |
+| <IntegrationName href="/providers/inference/openrouter" icon="openrouter" name="OpenRouter" /> | `openrouter/anthropic/claude-fable-5.2` |
+| <IntegrationName href="/providers/inference/vercel-ai-gateway" icon="vercel" name="Vercel AI Gateway" /> | `vercel/anthropic/claude-fable-5.2` |
+| <IntegrationName href="/providers/inference/requesty" icon="requesty" name="Requesty" /> | `requesty/anthropic/claude-fable-5.2` |
+| <IntegrationName href="/providers/inference/anthropic" icon="anthropic" name="Anthropic" /> | `anthropic/claude-fable-5-2` |
+| <IntegrationName href="/providers/inference/opencode" icon="opencode" name="OpenCode Zen" /> | `opencode/claude-fable-5-2` |
+| <IntegrationName href="/providers/inference/amazon-bedrock" icon="bedrock" name="Amazon Bedrock Mantle" /> | `bedrock-mantle/anthropic.claude-fable-5-2` |
+
+After upgrading Roomote, open **Settings > Models**, enable Fable 5.2 in
+**Available Models** for a connected provider, then assign it to a role or select
+it for a session or task. Managed Roomote inference offers the same model through
+its existing recommendation flow when that service is available on your deployment.
+Model access still depends on the provider account, region, or plan.
+
+Fable 5.2 replaces Fable 5 and 5.1 in these recommendations. Existing saved
+predecessor models, defaults, role mappings, and presets stay unchanged; choose
+Fable 5.2 when you want to switch. GitHub Copilot retains its Fable 5 and 5.1
+recommendations. Azure OpenAI and Azure AI Foundry are not included in Roomote's
+curated Fable 5.2 routes.
+
+### Other recommended models
 
 **Claude Sonnet 5.5** is the current curated Claude recommendation where a
 connected provider exposes its verified route. New connections can discover it

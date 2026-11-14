@@ -112,6 +112,22 @@ Roomote surfaces release history and available updates in the web app:
   image, with the latest release expanded. After an upgrade, Roomote also shows
   the latest "what's new" notice once.
 
+### HTTP telemetry after upgrading to Roomote 1.21.0
+
+Roomote 1.21.0 includes an OpenTelemetry HTTP instrumentation security update
+that redacts sensitive signed-URL query parameters in incoming request spans.
+The updated instrumentation emits only stable HTTP semantic conventions;
+legacy and duplicate HTTP attributes and metrics are removed, regardless of
+`OTEL_SEMCONV_STABILITY_OPT_IN`.
+
+If you collect HTTP telemetry for custom dashboards or alerts, review your
+collector processing and queries before upgrading. Update references to legacy
+fields and metrics to the stable conventions, and verify that request counts,
+latency charts, and error alerts still receive data after the upgrade. See
+[OpenTelemetry's HTTP semantic-convention migration guide](https://opentelemetry.io/docs/specs/semconv/non-normative/http-migration/)
+for the field, metric, and unit changes. This affects instrumented HTTP signals,
+not Roomote's in-app Cost Analytics or its anonymous product analytics controls.
+
 ### Worker runtime and saved snapshots
 
 The worker image ships Node 22.23.4, and the TLS trust minimum is Node 22.23.4,

@@ -2,6 +2,30 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.21.0 (2026-11-14)
+
+Roomote 1.21.0 adds Claude Fable 5.2 recommendations, improves reliability for large histories and long-running services, and strengthens HTTP security.
+
+### Highlights
+
+- Choose Claude Fable 5.2 through seven supported inference routes without changing existing model selections.
+- Keep Analytics, recent-log diagnostics, and background services working without exhausting memory or container disk.
+- Recover promptly when an integration server stalls during discovery, and preserve explicit keep-draft requests during pull request delivery.
+- Includes HTTP and XML security updates. **Custom HTTP telemetry dashboards and queries must use stable semantic conventions after upgrading.**
+
+### Minor changes
+
+- Claude Fable 5.2 is recommended through Roomote inference, OpenRouter, Vercel AI Gateway, Requesty, Anthropic, OpenCode Zen, and Amazon Bedrock Mantle. Enable it in Models settings and select it for a role, session, or task; existing saved models, defaults, and mappings stay unchanged.
+
+### Patch changes
+
+- Opening Analytics on a deployment with a large task history no longer runs the web server out of memory.
+- Pull request delivery now records explicit requests to keep a pull request in draft, preserving that hold across later pushes and clean automated reviews until an explicit ready-for-review update releases it.
+- Reading recent harness logs no longer loads the entire historical log into worker memory, avoiding out-of-memory failures during diagnostic requests.
+- Security updates harden HTTP request validation and middleware, prevent WebSocket upgrade crashes, redact sensitive signed-URL query parameters in incoming HTTP spans, and patch excessive CPU use in XML parsing. The HTTP telemetry update emits stable-only semantic conventions; operators using legacy HTTP fields or metrics must update custom dashboards, alerts, and collector queries.
+- Integration discovery no longer hangs beyond its timeout when an MCP server stalls during initialization. Discovery has a 30-second total budget, and tool calls have a separate 120-second total budget, including connection setup; failed discovery can be retried after the server recovers.
+- Background services no longer fill their container disk with native libraries left behind by each OpenCode helper server, which could get them evicted by the hosting platform.
+
 ## 1.20.2 (2026-11-06)
 
 Roomote 1.20.2 keeps long-running tasks moving, restores resumable work after safety stops, and includes a security update for file-pattern matching.
