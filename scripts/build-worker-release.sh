@@ -142,51 +142,65 @@ if [[ "$PUBLISH" = true && -n "${SENTRY_AUTH_TOKEN:-}" ]]; then
     apps/worker/dist
 fi
 
+# Each build owns its staging tree and unpublished files. A failed package must
+# leave the previous release and its checksum usable.
+STAGING_DIR=$(mktemp -d)
+ARCHIVE_TMP="${ARCHIVE_PATH}.tmp.$$"
+CHECKSUM_TMP="${CHECKSUM_PATH}.tmp.$$"
+cleanup() {
+  rm -rf "$STAGING_DIR"
+  rm -f "$ARCHIVE_TMP" "$CHECKSUM_TMP"
+}
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+PACKAGE_DIR="$STAGING_DIR/$TAG"
+
 # Package
-rm -rf "$TAG" "$CHECKSUM_PATH"
-mkdir -p "$TAG/dist" "$TAG/.agents/skills"
+mkdir -p "$PACKAGE_DIR/dist" "$PACKAGE_DIR/.agents/skills"
 # Copy the entire worker dist tree so runtime assets such as bundled patch files
 # ship alongside the JS entrypoints they are resolved from.
-cp -R apps/worker/dist/. "$TAG/dist/"
+cp -R apps/worker/dist/. "$PACKAGE_DIR/dist/"
 # Strip sourcemaps from the packaged release. Sourcemaps embed the original
 # TypeScript via sourcesContent, so they must not ship in release archives
 # (which are baked into the app image and injected into task sandboxes).
 # The Sentry upload above reads from apps/worker/dist and is unaffected.
-find "$TAG/dist" -type f -name '*.map' -delete
+find "$PACKAGE_DIR/dist" -type f -name '*.map' -delete
 # MCP configs go into .agents/ (Claude Code reads them).
-[ -d ".docker/config/mcp" ] && cp -r .docker/config/mcp "$TAG/.agents/"
+[ -d ".docker/config/mcp" ] && cp -r .docker/config/mcp "$PACKAGE_DIR/.agents/"
 # Packaged skills source folders live outside .agents/ so they don't pollute the
 # agent home. activateSkillsFolder() copies the selected one into .agents/skills/.
-[ -d "packages/cloud-agents/src/server/workflows/skills" ] && cp -r packages/cloud-agents/src/server/workflows/skills "$TAG/.packaged-skills"
+[ -d "packages/cloud-agents/src/server/workflows/skills" ] && cp -r packages/cloud-agents/src/server/workflows/skills "$PACKAGE_DIR/.packaged-skills"
 # Use the skill shipped with the same pinned package as the bundled CLI.
-cp -R apps/worker/dist/skills/judgement "$TAG/.packaged-skills/standard/judgement"
-echo "$VERSION" > "$TAG/VERSION"
-echo "${GITHUB_SHA:-$(git rev-parse HEAD 2>/dev/null || echo unknown)}" > "$TAG/COMMIT"
-echo "$NODE_PTY_VERSION" > "$TAG/NODE_PTY_VERSION"
-echo "$PM2_VERSION" > "$TAG/PM2_VERSION"
+cp -R apps/worker/dist/skills/judgement "$PACKAGE_DIR/.packaged-skills/standard/judgement"
+echo "$VERSION" > "$PACKAGE_DIR/VERSION"
+echo "${GITHUB_SHA:-$(git rev-parse HEAD 2>/dev/null || echo unknown)}" > "$PACKAGE_DIR/COMMIT"
+echo "$NODE_PTY_VERSION" > "$PACKAGE_DIR/NODE_PTY_VERSION"
+echo "$PM2_VERSION" > "$PACKAGE_DIR/PM2_VERSION"
 
 # Strip macOS xattrs if needed
-command -v xattr &>/dev/null && xattr -cr "$TAG" 2>/dev/null || true
+command -v xattr &>/dev/null && xattr -cr "$PACKAGE_DIR" 2>/dev/null || true
 
 # Create release archive atomically to avoid race with fs.watch consumers.
 # Write to a temp file first, then mv to the final path so watchers only
 # ever see a complete archive.
-ARCHIVE_TMP="${ARCHIVE_PATH}.tmp.$$"
 if command -v gtar &>/dev/null; then
-  gtar -czf "$ARCHIVE_TMP" "$TAG"
+  gtar -czf "$ARCHIVE_TMP" -C "$STAGING_DIR" "$TAG"
 elif [[ "$OSTYPE" == "darwin"* ]]; then
-  COPYFILE_DISABLE=1 tar --no-xattrs -czf "$ARCHIVE_TMP" "$TAG" 2>/dev/null || COPYFILE_DISABLE=1 tar -czf "$ARCHIVE_TMP" "$TAG"
+  COPYFILE_DISABLE=1 tar --no-xattrs -czf "$ARCHIVE_TMP" -C "$STAGING_DIR" "$TAG" 2>/dev/null || COPYFILE_DISABLE=1 tar -czf "$ARCHIVE_TMP" -C "$STAGING_DIR" "$TAG"
 else
-  tar -czf "$ARCHIVE_TMP" "$TAG"
+  tar -czf "$ARCHIVE_TMP" -C "$STAGING_DIR" "$TAG"
 fi
-mv -f "$ARCHIVE_TMP" "$ARCHIVE_PATH"
 
-# Checksum
-CHECKSUM=$(sha256sum "$ARCHIVE_PATH" 2>/dev/null || shasum -a 256 "$ARCHIVE_PATH")
+# Compute both outputs before replacing either previous release file.
+CHECKSUM=$(sha256sum "$ARCHIVE_TMP" 2>/dev/null || shasum -a 256 "$ARCHIVE_TMP")
 CHECKSUM="${CHECKSUM%%  *}"  # Extract just the hash (before the double-space separator)
-echo "$CHECKSUM  $ARCHIVE_NAME" > "$CHECKSUM_PATH"
+echo "$CHECKSUM  $ARCHIVE_NAME" > "$CHECKSUM_TMP"
+mv -f "$ARCHIVE_TMP" "$ARCHIVE_PATH"
+mv -f "$CHECKSUM_TMP" "$CHECKSUM_PATH"
 
-rm -rf "$TAG"
+cleanup
 echo "✓ Created $ARCHIVE_PATH ($(ls -lh "$ARCHIVE_PATH" | awk '{print $5}'))"
 
 # CI outputs
