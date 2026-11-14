@@ -17,11 +17,19 @@ import {
   useContext,
   useState,
 } from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 
 const state = vi.hoisted(() => ({
   createSnapshot: vi.fn().mockResolvedValue({ success: true }),
   clearSnapshot: vi.fn(),
+  duplicateEnvironment: vi.fn(),
   refetchEnvironments: vi.fn(),
   environmentQuery: {
     isPending: false,
@@ -120,7 +128,7 @@ vi.mock('@/hooks/environments', () => ({
   }),
   useDuplicateEnvironment: () => ({
     isPending: false,
-    mutateAsync: vi.fn(),
+    mutateAsync: state.duplicateEnvironment,
   }),
   useRetryEnvironmentVerification: () => ({
     isPending: false,
@@ -293,7 +301,9 @@ vi.mock('@/components/system', () => ({
     children,
     ...props
   }: { children: ReactNode } & HTMLAttributes<HTMLDivElement>) => (
-    <div {...props}>{children}</div>
+    <div role="dialog" {...props}>
+      {children}
+    </div>
   ),
   DialogDescription: ({
     children,
@@ -387,10 +397,6 @@ vi.mock('@/components/settings', () => ({
   ),
 }));
 
-vi.mock('./DuplicateEnvironmentDialog', () => ({
-  DuplicateEnvironmentDialog: () => null,
-}));
-
 import { Environments } from './Environments';
 
 describe('Environments', () => {
@@ -445,8 +451,84 @@ describe('Environments', () => {
     ];
     state.createSnapshot.mockClear();
     state.clearSnapshot.mockClear();
+    state.duplicateEnvironment.mockReset();
     state.refetchEnvironments.mockClear();
   });
+
+  it.each(['same', 'different'])(
+    'preserves a reopened duplicate draft for the %s environment when an earlier request finishes',
+    async (source) => {
+      state.environments.push({
+        ...state.environments[0]!,
+        id: 'env-2',
+        name: 'Other Environment',
+      });
+      let finish!: (result: { success: boolean }) => void;
+      state.duplicateEnvironment.mockReturnValue(
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+      );
+      render(<Environments />);
+
+      fireEvent.click(screen.getAllByRole('button', { name: 'Duplicate' })[0]!);
+      fireEvent.change(
+        screen.getByRole('textbox', { name: 'New Environment Name' }),
+        { target: { value: 'First copy' } },
+      );
+      fireEvent.click(
+        within(screen.getByRole('dialog')).getByRole('button', {
+          name: 'Duplicate',
+        }),
+      );
+      expect(state.duplicateEnvironment).toHaveBeenCalledWith({
+        id: 'env-1',
+        newName: 'First copy',
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+      fireEvent.click(
+        screen.getAllByRole('button', { name: 'Duplicate' })[
+          source === 'same' ? 0 : 1
+        ]!,
+      );
+      fireEvent.change(
+        screen.getByRole('textbox', { name: 'New Environment Name' }),
+        { target: { value: 'Later unsaved draft' } },
+      );
+
+      await act(async () => {
+        finish({ success: true });
+      });
+
+      expect(
+        screen.getByRole('textbox', { name: 'New Environment Name' }),
+      ).toHaveValue('Later unsaved draft');
+      expect(state.duplicateEnvironment).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each([true, false])(
+    'closes the submitting duplicate dialog only on success (%s)',
+    async (success) => {
+      state.duplicateEnvironment.mockResolvedValue({ success });
+      render(<Environments />);
+      fireEvent.click(screen.getByRole('button', { name: 'Duplicate' }));
+      fireEvent.click(
+        within(screen.getByRole('dialog')).getByRole('button', {
+          name: 'Duplicate',
+        }),
+      );
+      await waitFor(() =>
+        expect(state.duplicateEnvironment).toHaveBeenCalledOnce(),
+      );
+      await act(async () => {});
+      expect(Boolean(screen.queryByRole('dialog'))).toBe(!success);
+      if (!success)
+        expect(
+          screen.getByRole('textbox', { name: 'New Environment Name' }),
+        ).toHaveValue('Main Environment (Copy)');
+    },
+  );
 
   it('shows a create-environment notice when there are no environments', () => {
     state.environments = [];
