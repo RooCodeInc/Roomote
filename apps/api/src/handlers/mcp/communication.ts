@@ -1,6 +1,10 @@
 import { Hono } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
-import { chatDestinationLookupInputSchema } from '@roomote/types';
+import {
+  chatDestinationLookupInputSchema,
+  normalizeChannelMessagesRequest,
+  type CommunicationChannelMessagesRequest,
+} from '@roomote/types';
 
 import type { Variables } from '../../types';
 
@@ -50,32 +54,13 @@ function parseMessageContextRequestBody(body: unknown): {
   };
 }
 
-function parseChannelMessagesRequestBody(body: unknown): {
-  channel?: string;
-  oldest?: string;
-  latest?: string;
-  historyLatest?: string;
-} {
+function parseChannelMessagesRequestBody(
+  body: unknown,
+): CommunicationChannelMessagesRequest {
   if (!body || typeof body !== 'object') {
     throw new Error('Request body must be a JSON object');
   }
-  const record = body as Record<string, unknown>;
-  const historyLatest =
-    typeof record.historyLatest === 'string'
-      ? record.historyLatest.trim()
-      : undefined;
-  const channel =
-    typeof record.channel === 'string' ? record.channel.trim() : undefined;
-  const oldest =
-    typeof record.oldest === 'string' ? record.oldest.trim() : undefined;
-  const latest =
-    typeof record.latest === 'string' ? record.latest.trim() : undefined;
-  return {
-    ...(channel ? { channel } : {}),
-    ...(oldest ? { oldest } : {}),
-    ...(latest ? { latest } : {}),
-    ...(historyLatest ? { historyLatest } : {}),
-  };
+  return normalizeChannelMessagesRequest(body as Record<string, unknown>);
 }
 
 export const communicationMcp = new Hono<{
