@@ -5,8 +5,11 @@ import {
   users,
   environments,
   llmUsageEvents,
+  taskRuns,
+  and,
   desc,
   eq,
+  gte,
   inArray,
   isNull,
   sql,
@@ -15,7 +18,6 @@ import {
 import { type AnalyticsMetric, type TimePeriodFilter } from '@/types';
 import type { UserAuthSuccess } from '@/types';
 
-import { getLatestTaskRunsByTaskId } from '../task-runs';
 import {
   NO_PROJECT_LABEL,
   NO_VALUE_LABEL,
@@ -212,6 +214,42 @@ type TaskAnalyticsBaseRow = {
   canViewDetails: boolean;
 };
 
+const LATEST_RUN_LOOKUP_BATCH_SIZE = 5_000;
+
+/**
+ * Only the latest run's environment is needed here. Loading whole run rows
+ * (payload JSON for every run of every task) took hundreds of MB per request
+ * on large deployments and exhausted the web heap.
+ */
+async function getLatestRunEnvironmentIdsByTaskId(
+  taskIds: string[],
+): Promise<Map<string, string>> {
+  const environmentIdByTaskId = new Map<string, string>();
+  for (
+    let index = 0;
+    index < taskIds.length;
+    index += LATEST_RUN_LOOKUP_BATCH_SIZE
+  ) {
+    const batch = taskIds.slice(index, index + LATEST_RUN_LOOKUP_BATCH_SIZE);
+    const rows = await db
+      .selectDistinctOn([taskRuns.taskId], {
+        taskId: taskRuns.taskId,
+        environmentId: sql<
+          string | null
+        >`${taskRuns.payload} ->> 'environmentId'`,
+      })
+      .from(taskRuns)
+      .where(inArray(taskRuns.taskId, batch))
+      .orderBy(taskRuns.taskId, desc(taskRuns.id));
+    for (const row of rows) {
+      if (row.taskId && row.environmentId) {
+        environmentIdByTaskId.set(row.taskId, row.environmentId);
+      }
+    }
+  }
+  return environmentIdByTaskId;
+}
+
 async function getTaskAnalyticsBaseRows(
   auth: UserAuthSuccess,
   timePeriod: TimePeriodFilter | undefined,
@@ -239,36 +277,23 @@ async function getTaskAnalyticsBaseRows(
     })
     .from(tasks)
     .leftJoin(users, eq(users.id, tasks.initiatorUserId))
-    .where(isNull(tasks.deletedAt))
+    .where(
+      and(
+        isNull(tasks.deletedAt),
+        cutoff ? gte(tasks.createdAt, cutoff) : undefined,
+      ),
+    )
     .orderBy(desc(tasks.timestamp));
 
-  const filteredTasks = cutoff
-    ? taskResults.filter((task) => task.timestamp >= cutoff)
-    : taskResults;
+  const filteredTasks = taskResults;
 
   const detailTaskIds = filteredTasks
     .filter((task) => canViewPrivateAnalyticsDetails(auth, task))
     .map((task) => task.id);
-  const latestRunsByTaskId = await getLatestTaskRunsByTaskId(detailTaskIds);
+  const environmentIdByTaskId =
+    await getLatestRunEnvironmentIdsByTaskId(detailTaskIds);
 
-  const environmentIds = [
-    ...new Set(
-      filteredTasks
-        .map((task) => {
-          const payload = latestRunsByTaskId[task.id]?.payload;
-          if (
-            payload &&
-            typeof payload === 'object' &&
-            'environmentId' in payload &&
-            typeof payload.environmentId === 'string'
-          ) {
-            return payload.environmentId;
-          }
-          return null;
-        })
-        .filter((value): value is string => value !== null),
-    ),
-  ];
+  const environmentIds = [...new Set(environmentIdByTaskId.values())];
 
   const environmentRows = await db
     .select({
@@ -311,15 +336,7 @@ async function getTaskAnalyticsBaseRows(
 
   return filteredTasks.map((task) => {
     const canViewDetails = canViewPrivateAnalyticsDetails(auth, task);
-    const latestRun = latestRunsByTaskId[task.id];
-    const payload = latestRun?.payload;
-    const environmentId =
-      payload &&
-      typeof payload === 'object' &&
-      'environmentId' in payload &&
-      typeof payload.environmentId === 'string'
-        ? payload.environmentId
-        : null;
+    const environmentId = environmentIdByTaskId.get(task.id) ?? null;
 
     const userDimension =
       task.initiatorKind === 'automation'
