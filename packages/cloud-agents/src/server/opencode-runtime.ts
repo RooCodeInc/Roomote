@@ -49,6 +49,7 @@ import {
   FAST_AGENT_SUBAGENT_TOOL_FILTER,
 } from './fast-agent/fast-agent-tool-policy';
 import { scrubOpenCodeHelperEnv } from './opencode-helper-env';
+import { sweepOpenCodeExtractedNativeLibraries } from './opencode-native-lib-sweep';
 import { seedOpenCodePluginDependenciesForEnv } from './opencode-plugin-seed';
 
 const ESCAPE_CHARACTER = String.fromCharCode(27);
@@ -1077,7 +1078,10 @@ async function startManagedOpenCodeSdkServer(
     cleanupTaskData();
     throw error;
   }
-  proc.once('close', cleanupTaskData);
+  proc.once('close', () => {
+    cleanupTaskData();
+    sweepOpenCodeExtractedNativeLibraries();
+  });
 
   liveOpenCodeSdkServerProcs.add(proc);
   proc.once('exit', () => {
