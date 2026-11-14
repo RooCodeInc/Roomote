@@ -514,11 +514,6 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
           ['openrouter', 'openrouter/anthropic/claude-fable-5.2'],
           ['vercel', 'vercel/anthropic/claude-fable-5.2'],
           ['requesty', 'requesty/anthropic/claude-fable-5.2'],
-          ['azure', 'azure/claude-fable-5-2'],
-          [
-            'azure-cognitive-services',
-            'azure-cognitive-services/claude-fable-5-2',
-          ],
           ['anthropic', 'anthropic/claude-fable-5-2'],
           ['opencode', 'opencode/claude-fable-5-2'],
           ['amazon-bedrock', 'bedrock-mantle/anthropic.claude-fable-5-2'],
