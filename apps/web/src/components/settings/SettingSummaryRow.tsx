@@ -7,6 +7,7 @@ export function SettingSummaryRow({
   label,
   value,
   onEdit,
+  disabled = false,
   actionLabel = 'Edit',
   action,
 }: {
@@ -14,6 +15,7 @@ export function SettingSummaryRow({
   label: string;
   value: ReactNode;
   onEdit?: () => void;
+  disabled?: boolean;
   actionLabel?: string;
   action?: ReactNode;
 }) {
@@ -27,6 +29,7 @@ export function SettingSummaryRow({
         </span>
         {action ?? (
           <Button
+            disabled={disabled}
             type="button"
             variant="link"
             size="sm"
