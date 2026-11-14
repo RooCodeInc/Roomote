@@ -383,7 +383,7 @@ RUN apt -qq update && \
   else \
     echo "Unsupported architecture: $ARCH" && exit 1; \
   fi && \
-  curl -fsSL "$GH_CLI_URL" -o /tmp/gh.deb && \
+  curl -fsSL --retry 3 --retry-delay 2 --retry-max-time 120 --connect-timeout 15 --max-time 60 "$GH_CLI_URL" -o /tmp/gh.deb && \
   dpkg -i /tmp/gh.deb && \
   rm -f /tmp/gh.deb && \
   test -x /usr/bin/gh
