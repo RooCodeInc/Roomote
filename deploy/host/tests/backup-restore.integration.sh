@@ -107,11 +107,47 @@ compose_at "$source_root" up -d --wait --wait-timeout 180
 compose_at "$source_root" exec -T postgres \
   psql -U postgres -d roomote -v ON_ERROR_STOP=1 \
   -c "CREATE TABLE recovery_probe (value text NOT NULL); INSERT INTO recovery_probe VALUES ('database-survived');"
+compose_at "$source_root" exec -T postgres \
+  psql -U postgres -d roomote -v ON_ERROR_STOP=1 \
+  -c "CREATE TABLE backup_output_probe AS SELECT md5(i::text) AS value FROM generate_series(1,2048) i;"
 compose_at "$source_root" exec -T redis redis-cli SET recovery:queued redis-survived >/dev/null
 compose_at "$source_root" exec -T minio sh -c \
   "mkdir -p /data/roomote-artifacts && printf 'artifact-survived' >/data/roomote-artifacts/probe.txt"
 
-env ROOMOTE_TEST_MODE=true ROOMOTE_INSTALL_ROOT="$source_root" \
+# Limit only the actual encryption process, leaving Docker, pg_dump and tar
+# unchanged. A failed write must not publish the final backup name.
+mkdir -p "$work_dir/bin"
+export REAL_OPENSSL="$(command -v openssl)"
+cat >"$work_dir/bin/openssl" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "${LIMIT_BACKUP_OUTPUT:-false}" = true ]; then
+  ulimit -c 0
+  ulimit -f 1
+fi
+exec "$REAL_OPENSSL" "$@"
+EOF
+chmod +x "$work_dir/bin/openssl"
+if env PATH="$work_dir/bin:$PATH" LIMIT_BACKUP_OUTPUT=true \
+  ROOMOTE_TEST_MODE=true ROOMOTE_INSTALL_ROOT="$source_root" \
+  "$roomote_cli" backup --include-redis --passphrase-file "$passphrase_file" --output "$bundle" \
+  >"$work_dir/failed-encryption.log" 2>&1; then
+  printf 'backup unexpectedly succeeded with an encrypted-output size limit\n' >&2
+  exit 1
+fi
+if [ -e "$bundle" ]; then
+  printf 'failed encryption published a partial backup\n' >&2
+  exit 1
+fi
+grep -q 'File size limit exceeded' "$work_dir/failed-encryption.log"
+if compgen -G "$source_root/backups/.roomote-backup.*" >/dev/null; then
+  printf 'failed encryption left temporary encrypted output behind\n' >&2
+  exit 1
+fi
+# Restore only the test fixture's service availability after this deliberate
+# interruption. Service restart recovery is independent of output publication.
+compose_at "$source_root" up -d --wait --wait-timeout 180
+env PATH="$work_dir/bin:$PATH" ROOMOTE_TEST_MODE=true ROOMOTE_INSTALL_ROOT="$source_root" \
   "$roomote_cli" backup --include-redis --passphrase-file "$passphrase_file" --output "$bundle"
 
 if grep -a -q 'source-encryption-key-that-must-survive' "$bundle"; then
@@ -155,5 +191,8 @@ artifact_value="$(docker compose --project-name "$compose_project" \
 [ "$database_value" = 'database-survived' ]
 [ "$redis_value" = 'redis-survived' ]
 [ "$artifact_value" = 'artifact-survived' ]
+output_probe_count=$(compose_at "$fresh_root" exec -T postgres \
+  psql -U postgres -d roomote -Atqc 'SELECT count(*) FROM backup_output_probe')
+[ "$output_probe_count" = '2048' ]
 
 printf 'Fresh-host encrypted backup restore passed.\n'
