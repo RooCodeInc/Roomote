@@ -121,10 +121,13 @@ working if its owner's account is deactivated.
 
 ## Scoping and precedence
 
-Shared custom servers apply to every task. A personal server with the same
-name takes precedence for its owner, and an environment's own
-[`mcpServers`](/environments/definition#mcp-servers) entry with the same name
-takes precedence in that environment, so the more specific scope wins. Names
+Shared custom servers apply to every task. A personal remote server takes
+precedence over a same-named deployment-wide remote server for its owner.
+During task setup, remote servers are installed before an environment's own
+[`mcpServers`](/environments/definition#mcp-servers) entries. Environment entries
+with an already occupied name are skipped. For names not already occupied,
+environment entries take precedence over deployment-wide stdio servers. Use
+distinct names when you need both connections. Names
 that collide with built-in integrations (for example `linear` or `github`)
 are reserved and rejected.
 

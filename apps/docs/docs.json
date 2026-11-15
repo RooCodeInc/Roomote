@@ -228,6 +228,10 @@
   },
   "redirects": [
     {
+      "source": "/use-chatgpt-subscription",
+      "destination": "/providers/inference/chatgpt"
+    },
+    {
       "source": "/cloud",
       "destination": "/self-hosting"
     },
