@@ -20,10 +20,18 @@ with an API key. Granola API keys require a Business or Enterprise plan.
 
 Prefer a **workspace API key** from **Granola Settings > Connectors > Workspace
 API keys**. Workspace keys belong to the workspace rather than an individual,
-do not expire, and cannot read ordinary private notes. They can read:
+do not expire, and cannot read ordinary private notes. With **All spaces**
+selected, they can read:
 
 - notes visible to everyone in the workspace, including the Team space
 - notes in spaces where **Allow Granola API access** is enabled
+
+For narrower access, select specific spaces when creating the key. Only notes
+and folders in those spaces are available; include the Team space if Roomote
+needs public workspace notes. Selecting a private space does not grant access
+unless API access is also enabled for that space. To change an existing key's
+space selection, create a replacement key and revoke the old one. See
+[Granola's workspace API key guide](https://docs.granola.ai/help-center/sharing/integrations/granola-api#workspace-api-keys).
 
 Granola enables API access by default for newly created spaces. Review
 **Settings > Spaces** and turn it off anywhere Roomote should not read notes.

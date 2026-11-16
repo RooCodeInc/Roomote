@@ -43,5 +43,12 @@ the same authenticated configuration.
 Deployment operators can disable individual Exa tools from **Manage tools** in
 the integration settings.
 
+## Troubleshooting
+
+If keyless requests return `403 Forbidden`, check the Roomote deployment's
+outbound connection. Exa requires keyless access to use IPv4 and connect
+directly to its hosted MCP endpoint; IPv6 or a proxied network path requires
+authentication. Add an Exa API key to the built-in integration for that path.
+
 See [Exa's MCP documentation](https://exa.ai/docs/get-started/exa-mcp) for the
 provider's current capabilities and billing details.
