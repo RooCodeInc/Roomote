@@ -333,18 +333,18 @@ deploy/scripts/roomote-deploy upgrade \
   --version v0.1.0
 ```
 
-The upgrade command SSHes to the VM, refreshes the Compose and Caddy files under
-`/opt/roomote`, updates deployment-owned image and URL metadata in `.env`, and
-syncs a deployer-managed `MODAL_BASE_IMAGE_REF` to the new worker image before
-running:
+The upgrade command SSHes to the VM and refreshes the Compose and Caddy files
+under `/opt/roomote`. It downloads the selected worker and app images before
+stopping the controller or updating `.env`, so a failed download leaves dispatch
+running and the deployed image metadata intact. The selected version, registry
+and namespace are used for both downloads, including command-line overrides.
+Once downloads succeed, it stops the controller, updates deployment-owned image
+and URL metadata in `.env`, syncs a deployer-managed `MODAL_BASE_IMAGE_REF` to the
+new worker image, and runs:
 
 ```bash
 cd /opt/roomote
 docker compose --env-file .env -f docker-compose.prod.yml config >/dev/null
-docker compose --env-file .env -f docker-compose.prod.yml stop controller || true
-DOCKER_WORKER_IMAGE="$(awk -F= '/^(export[[:space:]]+)?DOCKER_WORKER_IMAGE=/ { sub(/^[^=]*=/, ""); print; exit }' .env)"
-docker pull "$DOCKER_WORKER_IMAGE"
-docker compose --env-file .env -f docker-compose.prod.yml pull
 docker compose --env-file .env -f docker-compose.prod.yml run --rm db-migrate
 docker compose --env-file .env -f docker-compose.prod.yml up -d --wait --wait-timeout 600
 ```

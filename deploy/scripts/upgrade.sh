@@ -101,8 +101,6 @@ if [ -f /etc/systemd/system/roomote-compose.service ]; then
   systemctl daemon-reload
 fi
 docker compose --env-file .env -f docker-compose.prod.yml config >/dev/null
-echo "Stopping controller before deployment metadata changes so new tasks remain queued during deploy"
-docker compose --env-file .env -f docker-compose.prod.yml stop controller || true
 
 read_env_value() {
   local key="$1"
@@ -141,6 +139,15 @@ app_domain="$(read_env_value ROOMOTE_APP_DOMAIN)"
   exit 1
 }
 trpc_url="https://$app_domain/_roomote-api"
+
+# Download the selected release while the previous deployment is still intact.
+# A registry failure must not leave dispatch stopped or .env on an unused tag.
+docker pull "$worker_image"
+IMAGE_REGISTRY="$image_registry" IMAGE_NAMESPACE="$image_namespace" \
+  docker compose --env-file .env -f docker-compose.prod.yml pull
+
+echo "Stopping controller before deployment metadata changes so new tasks remain queued during deploy"
+docker compose --env-file .env -f docker-compose.prod.yml stop controller || true
 
 tmp_env="$(mktemp)"
 awk \
@@ -259,8 +266,6 @@ if [ -z "$(read_env_value R_DISCORD_GATEWAY_SECRET | tr -d '[:space:]')" ]; then
 fi
 
 docker compose --env-file .env -f docker-compose.prod.yml config >/dev/null
-docker pull "$worker_image"
-docker compose --env-file .env -f docker-compose.prod.yml pull
 # Migrations run before any running service is replaced. Drizzle applies all
 # pending migrations in a single transaction, so a failure here rolls the
 # schema back while the previous release keeps serving.
