@@ -249,11 +249,9 @@ Notes:
   are prompted for the token, which the operator copies from the api
   service's Variables tab in the deployed project. The URL form
   `/setup?token=<value>` also works.
-- `R_PING_BASE_URL` is the endpoint for Roomote's anonymous analytics
-  and version checks (the image default is `https://ping.roomote.dev`; the
-  template points at the Roomote ping service). Admins can opt out of
-  anonymous analytics in the setup wizard or **Settings → Misc**; version
-  checks ignore that setting.
+- `R_PING_BASE_URL` is the endpoint for platform issue reports (the image
+  default is `https://ping.roomote.dev`). Self-hosted deployments send no
+  analytics, and the daily update check reads GitHub Releases directly.
 - The three `PREVIEW_*` variables ship **empty** (mark them optional in the
   Template Composer so the deploy screen does not prompt for them). Roomote
   and the preview-proxy service boot fine with them empty; previews report

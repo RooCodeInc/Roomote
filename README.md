@@ -19,7 +19,7 @@ something else, all the way.
 → you review, merge, done
 ```
 
-Source-available. Self-hosted. Use your ChatGPT subscription or bring your own
+Open source. Self-hosted. Use your ChatGPT subscription or bring your own
 API keys.
 
 ![Roomote chat workflow demo](assets/roomote-hero.gif)
@@ -223,7 +223,7 @@ tools. See the
 Claude Code, Codex, and Cursor instructions.
 
 **How is this different from Devin?**
-Devin is a closed, hosted product. Roomote is source-available and
+Devin is a closed, hosted product. Roomote is open source and
 self-hostable. You own your data, use your existing ChatGPT subscription or
 bring your own API keys, and pick your models. You can read every line of code
 it runs.
