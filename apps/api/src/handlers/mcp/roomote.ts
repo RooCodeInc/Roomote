@@ -17,6 +17,9 @@ import {
 } from '@roomote/sdk/server';
 import {
   CHAT_CHANNEL_MESSAGES_TOOL,
+  chatChannelMessagesFieldSchemas,
+  normalizeChannelMessagesRequest,
+  type CommunicationChannelMessagesRequest,
   CHAT_DESTINATIONS_TOOL,
   CHAT_MESSAGE_SEND_TOOL,
   CHAT_MESSAGE_CONTEXT_TOOL,
@@ -360,15 +363,13 @@ async function buildCommunicationMessageContextPayload(options: {
   });
 }
 
-async function buildCommunicationChannelMessagesPayload(options: {
-  auth: McpAuthContext;
-  actingUserId: string | null;
-  channel?: string;
-  oldest?: string;
-  latest?: string;
-  historyLatest?: string;
-  provider?: 'slack' | 'discord';
-}) {
+async function buildCommunicationChannelMessagesPayload(
+  options: CommunicationChannelMessagesRequest & {
+    auth: McpAuthContext;
+    actingUserId: string | null;
+    provider?: 'slack' | 'discord';
+  },
+) {
   let taskRun: CommunicationLookupTaskRun | undefined;
 
   if (options.auth.tokenType === 'run') {
@@ -383,16 +384,7 @@ async function buildCommunicationChannelMessagesPayload(options: {
   }
 
   return lookupCommunicationChannelMessages({
-    ...(options.historyLatest ? { historyLatest: options.historyLatest } : {}),
-    ...(typeof options.channel === 'string' && options.channel.length > 0
-      ? { channel: options.channel }
-      : {}),
-    ...(typeof options.oldest === 'string' && options.oldest.length > 0
-      ? { oldest: options.oldest }
-      : {}),
-    ...(typeof options.latest === 'string' && options.latest.length > 0
-      ? { latest: options.latest }
-      : {}),
+    ...normalizeChannelMessagesRequest(options),
     ...(taskRun ? { taskRun } : {}),
     ...(options.auth.tokenType === 'auth' && options.provider
       ? { provider: options.provider }
@@ -467,22 +459,7 @@ async function createRoomoteMcpServer(
       title: CHAT_CHANNEL_MESSAGES_TOOL.title,
       description: CHAT_CHANNEL_MESSAGES_TOOL.description,
       inputSchema: {
-        channel: z
-          .string()
-          .optional()
-          .describe(CHAT_CHANNEL_MESSAGES_TOOL.inputDescriptions.channel),
-        oldest: z
-          .string()
-          .optional()
-          .describe(CHAT_CHANNEL_MESSAGES_TOOL.inputDescriptions.oldest),
-        latest: z
-          .string()
-          .optional()
-          .describe(CHAT_CHANNEL_MESSAGES_TOOL.inputDescriptions.latest),
-        historyLatest: z
-          .string()
-          .optional()
-          .describe(CHAT_CHANNEL_MESSAGES_TOOL.inputDescriptions.historyLatest),
+        ...chatChannelMessagesFieldSchemas,
         provider: z
           .enum(['slack', 'discord'])
           .optional()
@@ -502,16 +479,10 @@ async function createRoomoteMcpServer(
       const payload = await buildCommunicationChannelMessagesPayload({
         auth,
         actingUserId,
-        ...(historyLatest ? { historyLatest: historyLatest.trim() } : {}),
-        ...(typeof channel === 'string' && channel.trim().length > 0
-          ? { channel: channel.trim() }
-          : {}),
-        ...(typeof oldest === 'string' && oldest.trim().length > 0
-          ? { oldest: oldest.trim() }
-          : {}),
-        ...(typeof latest === 'string' && latest.trim().length > 0
-          ? { latest: latest.trim() }
-          : {}),
+        channel,
+        oldest,
+        latest,
+        historyLatest,
         ...(provider ? { provider } : {}),
       });
 

@@ -1,19 +1,18 @@
 import {
   getCommunicationProviderDisplayName,
   getCommunicationProviderFromTaskPayload,
+  type CommunicationChannelMessagesRequest,
 } from '@roomote/types';
 
 import { COMMUNICATION_LOOKUP_STRATEGIES } from './communication-message-lookup-strategies';
 import type {
   CommunicationLookupTaskRun,
+  CommunicationChannelMessagesPayload,
   CommunicationMessageContextPayload,
   ParsedCommunicationReference,
   SupportedCommunicationLookupProvider,
 } from './communication-message-lookup-types';
-import {
-  applyChannelMessagesResultBudget,
-  type BudgetedCommunicationChannelMessagesPayload,
-} from './communication-channel-messages-budget';
+import { applyChannelMessagesResultBudget } from './communication-channel-messages-budget';
 import { McpProxyError } from './proxy-utils';
 
 export type { CommunicationLookupTaskRun } from './communication-message-lookup-types';
@@ -166,15 +165,13 @@ export async function lookupCommunicationMessageContext(options: {
   });
 }
 
-export async function lookupCommunicationChannelMessages(options: {
-  channel?: string;
-  oldest?: string;
-  latest?: string;
-  historyLatest?: string;
-  provider?: SupportedCommunicationLookupProvider;
-  taskRun?: CommunicationLookupTaskRun | null;
-  actingUserId?: string | null;
-}): Promise<BudgetedCommunicationChannelMessagesPayload> {
+export async function lookupCommunicationChannelMessages(
+  options: CommunicationChannelMessagesRequest & {
+    provider?: SupportedCommunicationLookupProvider;
+    taskRun?: CommunicationLookupTaskRun | null;
+    actingUserId?: string | null;
+  },
+): Promise<CommunicationChannelMessagesPayload> {
   const channel = options.channel?.trim();
   const reference = channel ? parseReference(channel) : null;
   const provider = resolveLookupProvider({

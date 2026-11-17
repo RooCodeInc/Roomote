@@ -1,6 +1,7 @@
 import type {
   ChatDestinationLookupResponse,
   CommunicationProvider,
+  CommunicationLookupMessage,
   SourceControlProvider,
   TaskArtifactType,
   TaskModelOption,
@@ -160,40 +161,12 @@ export interface SlackReactionAddResponse {
   name: string;
 }
 
-export interface CommunicationLookupMessage {
-  provider: CommunicationProvider;
-  id: string;
-  user: string;
-  username?: string;
-  botId?: string;
-  text: string;
-  channelId: string;
-  threadId?: string;
-  fileCount: number;
-  files?: Array<{
-    id: string;
-    name: string;
-    mimeType: string;
-    size: number;
-    url?: string;
-  }>;
-}
-
 export interface CommunicationMessageContextResponse {
   provider: CommunicationProvider;
   channelId: string;
   requestedMessageId: string;
   threadId: string;
   matchedMessageIndex: number;
-  messageCount: number;
-  messages: CommunicationLookupMessage[];
-}
-
-export interface CommunicationChannelMessagesResponse {
-  provider: CommunicationProvider;
-  channelId: string;
-  requestedOldest?: string;
-  requestedLatest?: string;
   messageCount: number;
   messages: CommunicationLookupMessage[];
 }

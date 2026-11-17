@@ -17,6 +17,7 @@ import {
   CHAT_MESSAGE_CONTEXT_TOOL,
   chatDestinationLookupFieldSchemas,
   chatDestinationLookupInputSchema,
+  chatChannelMessagesFieldSchemas,
   getManageCustomAutomationsTool,
   CREATE_CUSTOM_SKILL_TOOL,
   OPEN_ARTIFACT_TOOL,
@@ -1626,24 +1627,7 @@ if (!isFastAgentChild()) {
     {
       title: CHAT_CHANNEL_MESSAGES_TOOL.title,
       description: CHAT_CHANNEL_MESSAGES_TOOL.description,
-      inputSchema: {
-        channel: z
-          .string()
-          .optional()
-          .describe(CHAT_CHANNEL_MESSAGES_TOOL.inputDescriptions.channel),
-        oldest: z
-          .string()
-          .optional()
-          .describe(CHAT_CHANNEL_MESSAGES_TOOL.inputDescriptions.oldest),
-        latest: z
-          .string()
-          .optional()
-          .describe(CHAT_CHANNEL_MESSAGES_TOOL.inputDescriptions.latest),
-        historyLatest: z
-          .string()
-          .optional()
-          .describe(CHAT_CHANNEL_MESSAGES_TOOL.inputDescriptions.historyLatest),
-      },
+      inputSchema: chatChannelMessagesFieldSchemas,
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -1657,15 +1641,7 @@ if (!isFastAgentChild()) {
         return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
       }
 
-      return handleGetChatChannelMessages(
-        {
-          channel: params.channel,
-          oldest: params.oldest,
-          latest: params.latest,
-          historyLatest: params.historyLatest,
-        },
-        roomoteConfig,
-      );
+      return handleGetChatChannelMessages(params, roomoteConfig);
     },
   );
 

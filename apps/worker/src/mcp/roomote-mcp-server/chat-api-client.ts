@@ -1,10 +1,13 @@
 import { randomUUID } from 'node:crypto';
-import type { ChatDestinationLookupInput } from '@roomote/types';
+import type {
+  ChatDestinationLookupInput,
+  CommunicationChannelMessagesRequest,
+  CommunicationChannelMessagesResponse,
+} from '@roomote/types';
 
 import { buildApiHeaders, fetchWithTimeout } from './api-client.js';
 import { ChatDeliveryError } from './chat-delivery-error.js';
 import type {
-  CommunicationChannelMessagesResponse,
   CommunicationDestinationsResponse,
   CommunicationSendResponse,
   CommunicationMessageContextResponse,
@@ -227,12 +230,7 @@ export async function sendChatMessage(
 
 export async function getChatChannelMessages(
   config: RoomoteConfig,
-  input: {
-    channel?: string;
-    oldest?: string;
-    latest?: string;
-    historyLatest?: string;
-  },
+  input: CommunicationChannelMessagesRequest,
 ): Promise<CommunicationChannelMessagesResponse> {
   return postToCommunicationLookupEndpoint<CommunicationChannelMessagesResponse>(
     config,

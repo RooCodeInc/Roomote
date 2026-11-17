@@ -1,5 +1,6 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import type { CommunicationChannelMessagesResponse } from '@roomote/types';
 
 describe('sandbox channel history continuation', () => {
   const fetchMock = vi.fn();
@@ -36,13 +37,23 @@ describe('sandbox channel history continuation', () => {
     expect(tool?.inputSchema.properties).toHaveProperty('historyLatest');
   });
 
-  it('round-trips a history continuation to the API without narrowing the reply upper bound', async () => {
-    const firstPage = {
+  it('round-trips both independent continuations without narrowing the history reply upper bound', async () => {
+    const firstPage: CommunicationChannelMessagesResponse = {
       provider: 'slack',
       channelId: 'C123',
       messageCount: 0,
       messages: [],
       truncated: true,
+      requestedOldest: '100',
+      requestedLatest: '300',
+      requestedHistoryLatest: '300',
+      omittedMessageCount: 2,
+      nextLatest: '275',
+      sizeContinuation: {
+        oldest: '100',
+        latest: '275',
+        historyLatest: '300',
+      },
       historyContinuation: {
         oldest: '100',
         latest: '300',
@@ -50,7 +61,7 @@ describe('sandbox channel history continuation', () => {
       },
       note: 'Continue reading older roots with the original reply window.',
     };
-    const nextPage = {
+    const nextPage: CommunicationChannelMessagesResponse = {
       provider: 'slack',
       channelId: 'C123',
       messageCount: 1,
@@ -68,6 +79,7 @@ describe('sandbox channel history continuation', () => {
     };
     fetchMock
       .mockResolvedValueOnce(Response.json(firstPage))
+      .mockResolvedValueOnce(Response.json(nextPage))
       .mockResolvedValueOnce(Response.json(nextPage));
 
     const first = await client.callTool({
@@ -76,11 +88,13 @@ describe('sandbox channel history continuation', () => {
     });
     expect(first.isError).not.toBe(true);
     expect(first.structuredContent).toEqual(firstPage);
-    const continuation = (first.structuredContent as typeof firstPage)
-      .historyContinuation;
+    const { historyContinuation, sizeContinuation } =
+      first.structuredContent as CommunicationChannelMessagesResponse;
+    expect(historyContinuation).toBeDefined();
+    expect(sizeContinuation).toBeDefined();
     const next = await client.callTool({
       name: 'get_chat_channel_messages',
-      arguments: { channel: ' C123 ', ...continuation },
+      arguments: { channel: ' C123 ', ...historyContinuation },
     });
 
     expect(next.isError, JSON.stringify(next.content)).not.toBe(true);
@@ -97,8 +111,27 @@ describe('sandbox channel history continuation', () => {
         }),
       }),
     );
-    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(next.structuredContent).toEqual(nextPage);
+
+    const sizePage = await client.callTool({
+      name: 'get_chat_channel_messages',
+      arguments: { channel: 'C123', ...sizeContinuation },
+    });
+    expect(sizePage.isError, JSON.stringify(sizePage.content)).not.toBe(true);
+    expect(sizePage.structuredContent).toEqual(nextPage);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      'https://api.example.com/api/mcp/communication/channel_messages',
+      expect.objectContaining({
+        body: JSON.stringify({
+          channel: 'C123',
+          oldest: '100',
+          latest: '275',
+          historyLatest: '300',
+        }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it.each([' 200 ', '', null])(

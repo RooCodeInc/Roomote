@@ -1,7 +1,38 @@
 import {
   CHAT_DESTINATION_LOOKUP_MAX_LIMIT,
   chatDestinationLookupInputSchema,
+  normalizeChannelMessagesRequest,
 } from '../communication';
+
+describe('channel history request normalization', () => {
+  it('keeps root-history and reply bounds independent and removes non-wire fields', () => {
+    expect(
+      normalizeChannelMessagesRequest({
+        channel: ' C123 ',
+        oldest: ' 100 ',
+        latest: ' 300 ',
+        historyLatest: ' 200 ',
+        actingUserId: 'not-a-wire-field',
+      }),
+    ).toEqual({
+      channel: 'C123',
+      oldest: '100',
+      latest: '300',
+      historyLatest: '200',
+    });
+  });
+
+  it('preserves tolerant HTTP handling of empty and non-string optional fields', () => {
+    expect(
+      normalizeChannelMessagesRequest({
+        channel: ' ',
+        oldest: null,
+        latest: 300,
+        historyLatest: undefined,
+      }),
+    ).toEqual({});
+  });
+});
 
 describe('chatDestinationLookupInputSchema', () => {
   it('rejects unfiltered lookup', () => {

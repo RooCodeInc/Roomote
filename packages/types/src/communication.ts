@@ -216,6 +216,91 @@ export const CHAT_CHANNEL_MESSAGES_TOOL = {
   },
 } as const;
 
+export const chatChannelMessagesFieldSchemas = {
+  channel: z
+    .string()
+    .optional()
+    .describe(CHAT_CHANNEL_MESSAGES_TOOL.inputDescriptions.channel),
+  oldest: z
+    .string()
+    .optional()
+    .describe(CHAT_CHANNEL_MESSAGES_TOOL.inputDescriptions.oldest),
+  latest: z
+    .string()
+    .optional()
+    .describe(CHAT_CHANNEL_MESSAGES_TOOL.inputDescriptions.latest),
+  historyLatest: z
+    .string()
+    .optional()
+    .describe(CHAT_CHANNEL_MESSAGES_TOOL.inputDescriptions.historyLatest),
+} as const;
+
+export type CommunicationChannelMessagesRequest = z.infer<
+  z.ZodObject<typeof chatChannelMessagesFieldSchemas>
+>;
+
+/** Preserve the HTTP boundary's tolerant optional-string normalization. */
+export function normalizeChannelMessagesRequest(
+  input: Record<string, unknown>,
+): CommunicationChannelMessagesRequest {
+  return Object.fromEntries(
+    Object.keys(chatChannelMessagesFieldSchemas).flatMap((key) => {
+      const value = input[key];
+      return typeof value === 'string' && value.trim()
+        ? [[key, value.trim()]]
+        : [];
+    }),
+  );
+}
+
+export type SupportedCommunicationLookupProvider = Extract<
+  CommunicationProvider,
+  'slack' | 'discord'
+>;
+
+export type CommunicationLookupMessage = {
+  provider: SupportedCommunicationLookupProvider;
+  id: string;
+  user: string;
+  username?: string;
+  botId?: string;
+  text: string;
+  channelId: string;
+  threadId?: string;
+  fileCount: number;
+  files?: Array<{
+    id: string;
+    name: string;
+    mimeType: string;
+    size: number;
+    url?: string;
+  }>;
+};
+
+export type ChannelMessagesContinuation = Pick<
+  CommunicationChannelMessagesRequest,
+  'oldest' | 'latest' | 'historyLatest'
+>;
+
+export type CommunicationChannelMessagesResponse = {
+  provider: SupportedCommunicationLookupProvider;
+  slackTeamId?: string;
+  channelId: string;
+  requestedOldest?: string;
+  requestedLatest?: string;
+  requestedHistoryLatest?: string;
+  /** Independent pending reads; process both and deduplicate messages by ID. */
+  historyContinuation?: ChannelMessagesContinuation;
+  sizeContinuation?: ChannelMessagesContinuation;
+  /** Set for a partial read; see `note` and the independent continuations. */
+  truncated?: true;
+  omittedMessageCount?: number;
+  nextLatest?: string;
+  note?: string;
+  messageCount: number;
+  messages: CommunicationLookupMessage[];
+};
+
 export const communicationProviderQueuePrefixes = {
   slack: 'slack:messages:',
   teams: 'teams:messages:',

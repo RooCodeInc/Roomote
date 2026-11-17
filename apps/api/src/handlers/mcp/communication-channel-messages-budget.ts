@@ -27,14 +27,6 @@ function estimateMessageSize(message: CommunicationLookupMessage): number {
   return text.length + lineCount * MESSAGE_INDENT_CHARS + 2;
 }
 
-export type BudgetedCommunicationChannelMessagesPayload =
-  CommunicationChannelMessagesPayload & {
-    truncated?: true;
-    omittedMessageCount?: number;
-    nextLatest?: string;
-    note?: string;
-  };
-
 /**
  * Keep the newest messages that fit the budget. The messages arrive oldest
  * first, so the oldest are dropped first; the response names the newest
@@ -44,7 +36,7 @@ export type BudgetedCommunicationChannelMessagesPayload =
 export function applyChannelMessagesResultBudget(
   payload: CommunicationChannelMessagesPayload,
   budgetChars: number = CHANNEL_MESSAGES_RESULT_BUDGET_CHARS,
-): BudgetedCommunicationChannelMessagesPayload {
+): CommunicationChannelMessagesPayload {
   if (serializedSize(payload) <= budgetChars) {
     return payload;
   }
@@ -66,7 +58,7 @@ export function applyChannelMessagesResultBudget(
   let kept = messages.slice(messages.length - keep);
   const build = (
     subset: CommunicationLookupMessage[],
-  ): BudgetedCommunicationChannelMessagesPayload => {
+  ): CommunicationChannelMessagesPayload => {
     const omitted = messages.length - subset.length;
     const newestOmitted = messages[omitted - 1];
     return {
