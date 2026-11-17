@@ -32,7 +32,6 @@ export async function completeSetupWithStarterTasksCommand(
   input: {
     launchBatchId: string;
     selectedStarterTaskIds: SetupStarterTaskId[];
-    anonymousAnalyticsEnabled?: boolean;
     productUpdatesEnabled?: boolean;
   },
 ): Promise<CompleteSetupWithStarterTasksResult> {
@@ -51,9 +50,6 @@ export async function completeSetupWithStarterTasksCommand(
 
   try {
     await completeSetupCommand(auth, {
-      ...(input.anonymousAnalyticsEnabled === undefined
-        ? {}
-        : { anonymousAnalyticsEnabled: input.anonymousAnalyticsEnabled }),
       ...(input.productUpdatesEnabled === undefined
         ? {}
         : { productUpdatesEnabled: input.productUpdatesEnabled }),

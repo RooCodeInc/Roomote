@@ -21,10 +21,6 @@ vi.mock('@roomote/db/server', () => ({
   taskRuns: {},
 }));
 
-vi.mock('@roomote/feature-flags', () => ({
-  isAnonymousAnalyticsEnabledFromMetadata: vi.fn(),
-}));
-
 import { submitPlatformIssueToPing } from '../server';
 
 describe('submitPlatformIssueToPing', () => {

@@ -10,7 +10,6 @@ import {
   Bug,
   Button,
   CopyIconButton,
-  EarOff,
   Mail,
   MessageSquarePlus,
   Input,
@@ -36,34 +35,9 @@ export function MiscSettings() {
   const queryClient = useQueryClient();
   const queryKey = trpc.miscSettings.get.queryKey();
   const settingsQuery = useQuery(trpc.miscSettings.get.queryOptions());
-  const updateMutation = useMutation(
-    trpc.miscSettings.setAnonymousAnalytics.mutationOptions(),
-  );
   const webhookMutation = useMutation(
     trpc.miscSettings.setSessionDoneWebhook.mutationOptions(),
   );
-
-  const handleToggle = async (nextValue: boolean) => {
-    const previous = settingsQuery.data;
-    queryClient.setQueryData<MiscSettingsData>(queryKey, (current) =>
-      current ? { ...current, anonymousAnalyticsEnabled: nextValue } : current,
-    );
-
-    try {
-      const updated = await updateMutation.mutateAsync({ enabled: nextValue });
-      queryClient.setQueryData<MiscSettingsData>(queryKey, updated);
-      toast.success(
-        `Anonymous analytics ${nextValue ? 'enabled' : 'disabled'}`,
-      );
-    } catch (error) {
-      queryClient.setQueryData<MiscSettingsData>(queryKey, previous);
-      toast.error(
-        error instanceof Error
-          ? error.message
-          : 'Failed to update anonymous analytics.',
-      );
-    }
-  };
 
   if (settingsQuery.isPending) {
     return (
@@ -129,28 +103,6 @@ export function MiscSettings() {
           </Button>
         </div>
       </Section>
-
-      {!settingsQuery.data.cloudEnabled && (
-        <Section icon={EarOff} title="Privacy">
-          <div className="flex gap-3">
-            <Switch
-              aria-label="Toggle anonymous analytics"
-              checked={settingsQuery.data.anonymousAnalyticsEnabled}
-              disabled={updateMutation.isPending}
-              onCheckedChange={(checked) => void handleToggle(checked === true)}
-            />
-            <div className="space-y-1">
-              <p className="text-sm font-semibold">Anonymous analytics</p>
-              <p className="text-sm text-muted-foreground">
-                Share anonymous usage analytics with the Roomote team to help
-                improve the product. Activity is identified only by random IDs
-                that are never linked to your company, users, or repositories.
-                No prompts, conversations or code is ever shared.
-              </p>
-            </div>
-          </div>
-        </Section>
-      )}
 
       <Section icon={Stethoscope} title="Diagnostics">
         <div className="space-y-3">

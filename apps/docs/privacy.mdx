@@ -1,17 +1,16 @@
 ---
 title: Privacy
 icon: shield-check
-description: Understand Roomote data handling, anonymous telemetry, and the controls available to deployment administrators.
+description: Understand Roomote data handling, which deployments send anonymous telemetry, and how version checks work.
 ---
 
-Roomote keeps the data boundaries for a deployment explicit. Product content,
-credentials, prompts, code, and repository names are not part of the default
-anonymous telemetry payload. Deployment administrators control whether a
-self-hosted deployment shares that telemetry, while a managed deployment follows its
-own privacy policy.
+Roomote keeps the data boundaries for a deployment explicit. Self-hosted
+deployments send no analytics or usage telemetry to the Roomote team. Managed
+deployments on Roomote Cloud send the anonymous telemetry described below and
+follow their own privacy policy.
 
-This page covers the telemetry payload, its identifiers, the controls that turn
-it off, and the separate version-availability check. It does not replace the
+This page covers the telemetry payload managed deployments send, its
+identifiers, and the version-availability check. It does not replace the
 privacy terms of the upstream inference, sandbox, communications, or
 integration providers you connect.
 
@@ -29,15 +28,14 @@ integration providers you connect.
 
 ## Anonymous telemetry
 
-Roomote can share **anonymous telemetry** with the Roomote team to help improve
-the product. This is on by default for self-hosted deployments, controlled
-entirely by deployment admins, and designed so that Roomote-generated
-identifiers and the default payload cannot identify your company, users, code,
-or repositories.
+Managed deployments on Roomote Cloud share **anonymous telemetry** with the
+Roomote team to help improve the product. It is designed so that
+Roomote-generated identifiers and the payload cannot identify your company,
+users, code, or repositories. Self-hosted deployments never send it.
 
 ## What gets sent
 
-When anonymous telemetry is enabled, your deployment sends:
+A managed deployment sends:
 
 - **Usage events** — page views (as route patterns like `/task/[taskId]`,
   never actual URLs or IDs) and product events such as tasks being created
@@ -75,35 +73,23 @@ By default, both are short random strings created locally. They are not derived
 from your domain, company, email addresses, or any other real-world identifier,
 and they cannot be edited or read through the app.
 
-If you override `R_INSTANCE_ID`, use a random, non-identifying value. Roomote
-sends the configured value with telemetry and version checks.
-
-## Turning it off
-
-Anonymous telemetry is opt-out:
-
-- during setup, the final step includes an **Anonymous analytics** switch
-- afterwards, admins can change it any time in **Settings > Deployment**
-
-The setting applies to everyone in the deployment. When disabled, no
-analytics code runs in the browser and no usage events or daily reports
-leave your servers.
+If you override `R_INSTANCE_ID` on a managed deployment, use a random,
+non-identifying value. Roomote sends the configured value with telemetry.
 
 ## Managed deployment controls
 
-Managed deployments always keep Roomote anonymous analytics enabled and
-do not show this switch, as described in our privacy policy. Cookie consent
-controls only optional support and product-experience services such as Intercom
-and PostHog.
+Managed deployments always send anonymous telemetry, as described in our
+privacy policy. Cookie consent controls only optional support and
+product-experience services such as Intercom and PostHog.
 
 ## Version checks
 
-Separately from analytics, your deployment checks once a day whether a newer
-Roomote release is available. This check is not optional and carries only
-the anonymous instance ID and your running version — no usage data.
+Once a day, every deployment reads the latest published Roomote release from
+GitHub to power the in-app update notice. The request goes to GitHub's public
+API and carries no instance ID, version, or usage data.
 
 ## Local development
 
-Deployments running in development or preview mode send nothing by default.
-Telemetry runs there only when `ROOMOTE_FORCE_TELEMETRY=true` and a Ping
-endpoint is explicitly configured.
+Deployments running in development or preview mode send nothing and skip the
+version check by default. They run only when `ROOMOTE_FORCE_TELEMETRY=true` and
+a Ping endpoint is explicitly configured.

@@ -12,15 +12,13 @@ import {
 const LOG_PREFIX = '[instancePing]';
 
 /**
- * Daily telemetry job:
- * 1. Version check against the Ping service (mandatory; carries only the
- *    anonymous instance id + running version). The result is stored for the
+ * Daily job:
+ * 1. Version check against GitHub Releases. The result is stored for the
  *    in-app "update available" notice.
- * 2. Anonymous instance stats report, honoring the admin opt-out.
+ * 2. Anonymous instance stats report, sent only by Roomote Cloud deployments.
  *
- * Sends nothing at all in environments where telemetry is not allowed
- * (non-production / no RELEASE_VERSION, unless force-enabled with an explicit
- * Ping endpoint).
+ * Does nothing in environments where telemetry is not allowed (non-production
+ * or no RELEASE_VERSION, unless force-enabled).
  */
 export async function instancePingJob(): Promise<void> {
   if (!isTelemetryEnvAllowed()) {
@@ -40,7 +38,7 @@ export async function instancePingJob(): Promise<void> {
 
   if (!(await isAnonymousAnalyticsEnabled())) {
     console.log(
-      `${LOG_PREFIX} instance report skipped: anonymous analytics disabled`,
+      `${LOG_PREFIX} instance report skipped: not a Roomote Cloud deployment`,
     );
     return;
   }
