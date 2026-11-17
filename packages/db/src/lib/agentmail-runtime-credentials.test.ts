@@ -14,10 +14,6 @@ vi.mock('@roomote/env', async (importOriginal) => ({
   Env: mockEnv,
 }));
 
-vi.mock('./deployment-license', () => ({
-  getEnvLicenseKey: () => mockEnv.R_LICENSE_KEY?.trim() || null,
-}));
-
 vi.mock('./model-runtime-config', () => ({
   resolveEffectiveDeploymentEnvVars: resolveEffectiveDeploymentEnvVarsMock,
 }));

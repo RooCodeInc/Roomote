@@ -10,7 +10,6 @@ export function SignInPageClient({
   canSignUp,
   inviteRole = null,
   inviteInvalid = false,
-  seatLimitBlocked = false,
   accountLinkHelpText = null,
   passwordResetAvailable = false,
 }: {
@@ -18,7 +17,6 @@ export function SignInPageClient({
   canSignUp: boolean;
   inviteRole?: UserRole | null;
   inviteInvalid?: boolean;
-  seatLimitBlocked?: boolean;
   accountLinkHelpText?: string | null;
   passwordResetAvailable?: boolean;
 }) {
@@ -32,11 +30,9 @@ export function SignInPageClient({
       accountLinkHelpText={accountLinkHelpText}
       passwordResetAvailable={passwordResetAvailable}
       noticeMessage={
-        seatLimitBlocked
-          ? 'This deployment has reached its licensed user limit. Ask an admin to free a seat or add a license key, then sign in again.'
-          : inviteInvalid
-            ? 'This invitation is no longer valid. You can still sign in to an existing account.'
-            : null
+        inviteInvalid
+          ? 'This invitation is no longer valid. You can still sign in to an existing account.'
+          : null
       }
     />
   );

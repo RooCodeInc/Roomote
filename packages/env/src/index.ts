@@ -409,11 +409,12 @@ const serverSchema = {
   GITHUB_AUTOMATED_SKIP_OWNERS: z.string().optional(),
   PREVIEW_DOMAINS: emptyStringDefault(),
   R_ALLOWED_EMAILS: z.string().optional(),
-  // Optional Roomote license key (RMLK1.…). When set, takes precedence over
-  // the key stored in deployment_settings via Settings → Users.
+  // Signed deployment key Roomote Cloud provisions onto the deployments it
+  // hosts. It authenticates the deployment to Cloud services such as managed
+  // email. Self-hosted deployments leave it unset.
   R_LICENSE_KEY: z.string().optional(),
-  // Roomote Cloud endpoint used to activate self-hosted licenses and report
-  // licensed seat usage. This is deliberately distinct from Ping telemetry.
+  // Roomote Cloud endpoint that hosted deployments call with R_LICENSE_KEY.
+  // This is deliberately distinct from Ping telemetry.
   R_LICENSE_CLOUD_BASE_URL: z
     .string()
     .url()

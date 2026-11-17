@@ -49,8 +49,3 @@ Fixes #
 - [ ] I added tests or included a clear manual validation note above
 - [ ] I removed secrets, tokens, private keys, and customer data from code, logs, and screenshots
 - [ ] If this change should appear in the changelog, I ran `pnpm changeset`
-
-<!--
-First-time contributors: the CLA Assistant bot will comment on this PR with
-signing instructions. You only need to sign once.
--->

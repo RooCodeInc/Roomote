@@ -18,7 +18,6 @@ export * from './env';
 export * from './get-callback-host';
 export * from './invite-context';
 export * from './invites';
-export * from './license';
 export * from './logger';
 export * from './s3-client';
 export * from './sentry-context';

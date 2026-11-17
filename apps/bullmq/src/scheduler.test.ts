@@ -72,7 +72,6 @@ vi.mock('./scheduled-jobs', () => ({
   refreshSnapshotsJob: vi.fn(),
   pullRequestAnalyticsSyncJob: vi.fn(),
   instancePingJob: vi.fn(),
-  licenseUsageSyncJob: vi.fn(),
   webhookCleanupJob: vi.fn(),
   standbyRetentionJob: vi.fn(),
   prReviewNotificationDispatchJob: vi.fn(),

@@ -505,7 +505,6 @@ import {
   getAccessPolicySettingsCommand,
   removeUserCommand,
   revokeInviteCommand,
-  setLicenseKeyCommand,
   setAccountLinkHelpCommand,
   updateUserRoleCommand,
 } from '../commands/access-policy';
@@ -3749,16 +3748,6 @@ export const appRouter = createRouter({
       )
       .mutation(({ ctx: { auth }, input }) =>
         createPasswordResetLinkCommand(auth, input),
-      ),
-
-    setLicenseKey: protectedProcedure
-      .input(
-        z.object({
-          licenseKey: z.string().trim().max(10_000).nullable(),
-        }),
-      )
-      .mutation(({ ctx: { auth }, input }) =>
-        setLicenseKeyCommand(auth, input),
       ),
   }),
 

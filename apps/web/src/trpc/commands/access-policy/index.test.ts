@@ -9,7 +9,6 @@ type TestUser = {
 
 const {
   state,
-  getEnvLicenseKeyMock,
   getAccountLinkHelpMock,
   setAccountLinkHelpMock,
 } = vi.hoisted(() => ({
@@ -18,7 +17,6 @@ const {
     credentialUserIds: [] as string[],
     createdResetLinkForUserId: null as string | null,
   },
-  getEnvLicenseKeyMock: vi.fn(() => null as string | null),
   getAccountLinkHelpMock: vi.fn(async () => null as string | null),
   setAccountLinkHelpMock: vi.fn(async (value: string | null) =>
     value?.trim() ? value.trim() : null,
@@ -75,18 +73,10 @@ vi.mock('@/lib/server', () => ({
       };
     },
   ),
-  FREE_SEAT_LIMIT: 10,
   getDeploymentAccessPolicy: vi.fn(async () => null),
-  getDeploymentLicenseState: vi.fn(async () => ({
-    status: 'unlicensed',
-    seatLimit: 10,
-  })),
-  getEffectiveDeploymentSeatLimit: vi.fn(async () => 10),
-  getEnvLicenseKey: getEnvLicenseKeyMock,
   isInviteUsable: vi.fn(() => true),
   listInvites: vi.fn(async () => []),
   removeUser: vi.fn(),
-  resolveLicenseState: vi.fn(() => ({ status: 'unlicensed', seatLimit: 10 })),
   revokeInvite: vi.fn(),
   updateUserRole: vi.fn(),
 }));
@@ -112,7 +102,6 @@ import {
   createPasswordResetLinkCommand,
   getAccountLinkHelpCommand,
   getAccessPolicySettingsCommand,
-  setLicenseKeyCommand,
   setAccountLinkHelpCommand,
 } from './index';
 
@@ -121,7 +110,6 @@ describe('access policy commands', () => {
     state.users = [];
     state.credentialUserIds = [];
     state.createdResetLinkForUserId = null;
-    getEnvLicenseKeyMock.mockReturnValue(null);
     getAccountLinkHelpMock.mockClear();
     getAccountLinkHelpMock.mockResolvedValue(null);
     setAccountLinkHelpMock.mockClear();
@@ -165,27 +153,6 @@ describe('access policy commands', () => {
         hasCredentialAccount: true,
       }),
     ]);
-    expect(result.license.fromEnv).toBe(false);
-  });
-
-  it('marks license.fromEnv when R_LICENSE_KEY is set', async () => {
-    getEnvLicenseKeyMock.mockReturnValue('RMLK1.env-key.signature');
-
-    const result = await getAccessPolicySettingsCommand({
-      isAdmin: true,
-    } as never);
-
-    expect(result.license.fromEnv).toBe(true);
-  });
-
-  it('rejects license key changes when R_LICENSE_KEY is set', async () => {
-    getEnvLicenseKeyMock.mockReturnValue('RMLK1.env-key.signature');
-
-    await expect(
-      setLicenseKeyCommand({ isAdmin: true } as never, {
-        licenseKey: 'RMLK1.ui-key.signature',
-      }),
-    ).rejects.toThrow(/R_LICENSE_KEY environment variable/);
   });
 
   it('rejects password reset link creation for non-admins', async () => {
