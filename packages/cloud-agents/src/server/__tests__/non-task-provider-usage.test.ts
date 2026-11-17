@@ -3312,6 +3312,38 @@ describe('resolveOpenCodeSmallModel', () => {
     ).toMatchObject({ retryable: false });
   });
 
+  it.each([401, 403])(
+    'retains the credential failure category for non-retryable HTTP %s',
+    async (statusCode) => {
+      const { classifyNonTaskInferenceError } =
+        await import('../non-task-provider-usage.js');
+
+      expect(
+        classifyNonTaskInferenceError({
+          name: 'APIError',
+          data: { message: 'Rejected', statusCode, isRetryable: false },
+        }),
+      ).toMatchObject({ reason: 'invalid_credentials', retryable: false });
+    },
+  );
+
+  it('preserves explicitly non-retryable gateway and model-access failures', async () => {
+    const { classifyNonTaskInferenceError } =
+      await import('../non-task-provider-usage.js');
+
+    for (const data of [
+      { statusCode: 403, responseBody: '<!doctype html><html>Blocked</html>' },
+      { statusCode: 404, message: 'Unknown model' },
+    ]) {
+      expect(
+        classifyNonTaskInferenceError({
+          name: 'APIError',
+          data: { ...data, isRetryable: false },
+        }),
+      ).toMatchObject({ reason: 'provider_error', retryable: false });
+    }
+  });
+
   it.each(['fetch failed', 'request terminated'])(
     'classifies a wrapped fetch reset with root message %j',
     async (message) => {
