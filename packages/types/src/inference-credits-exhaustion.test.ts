@@ -34,6 +34,53 @@ const GEMINI_RATE_LIMIT_MESSAGE =
   'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits.';
 
 describe('isInferenceCreditsExhaustedError', () => {
+  it('recognizes an exhausted lifetime trial even with a nonretryable 403', () => {
+    const message =
+      'Free trial used up — you have used 4.0M tokens lifetime (free limit 2.0M). The daily free quota no longer applies to this account. Pick a plan to keep going.';
+    for (const error of [
+      openCodeApiError({
+        statusCode: 403,
+        message,
+        isRetryable: false,
+        body: { type: 'error', error: { type: 'permission_error', message } },
+      }),
+      new Error(message),
+      { type: 'retry', attempt: 2, message },
+    ]) {
+      expect(isInferenceCreditsExhaustedError(error)).toBe(true);
+    }
+  });
+
+  it('does not treat a temporary trial limit or echoed lifetime trial as exhaustion', () => {
+    for (const error of [
+      openCodeApiError({
+        statusCode: 429,
+        message: 'Free trial used up for today. Try again tomorrow.',
+      }),
+      openCodeApiError({
+        statusCode: 429,
+        message: 'Free trial rate limit reached. Try again in 30 seconds.',
+      }),
+      {
+        name: 'APIError',
+        data: {
+          statusCode: 500,
+          message: 'Internal server error',
+          requestBodyValues: {
+            messages: [
+              {
+                role: 'user',
+                content: 'Free trial used up — 4.0M tokens lifetime.',
+              },
+            ],
+          },
+        },
+      },
+    ]) {
+      expect(isInferenceCreditsExhaustedError(error)).toBe(false);
+    }
+  });
+
   it('recognizes known credit exhaustion shapes', () => {
     for (const [_label, error] of [
       [
