@@ -975,8 +975,7 @@ Backups should include at minimum:
 
 ## License
 
-Roomote is licensed under the [Apache License 2.0](LICENSE). There is no user
-limit and no license key: a deployment can have as many users as you like.
+Roomote is licensed under the [Apache License 2.0](LICENSE).
 
 ## Current Limits
 

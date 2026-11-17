@@ -173,7 +173,7 @@ copy-pasting.
   or bring API keys from any supported provider. Switch models per task. No
   markup on tokens.
 - **Read every line.** The full source is here. Audit it, extend it, fork it.
-- **Apache 2.0, no seat limits.** Self-host it for as many users as you need.
+- **Apache 2.0.** Open source under a permissive license.
 
 ---
 
@@ -206,7 +206,7 @@ Need SSO, custom SLAs, or dedicated support? Get in touch:
 
 **Is Roomote open source?**
 Yes. Roomote is licensed under the [Apache License 2.0](LICENSE). You can read,
-modify, and self-host the code with no user limit or license key.
+modify, and self-host the code.
 
 **How is this different from Cursor / Copilot / Claude Code?**
 Those are IDE tools that help you write code faster in your editor. Roomote is a
@@ -242,7 +242,7 @@ Modal, E2B, Daytona, Blaxel, and Local Docker.
 GitHub, GitLab, Gitea, Azure DevOps, and Bitbucket Cloud. Connect one or many.
 
 **What does it cost?**
-Self-hosting is free, with no user limit. You pay your own model provider for
+Self-hosting is free. You pay your own model provider for
 tokens (or use the models bundled with your ChatGPT subscription).
 
 **I already pay for ChatGPT Plus. Do I need an API key too?**
