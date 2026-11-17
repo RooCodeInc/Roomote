@@ -351,11 +351,11 @@ describe('AuthForm', () => {
 
   it('shows a server-provided notice above the form', () => {
     render(
-      <AuthForm noticeMessage="This deployment has reached its licensed user limit. Ask an admin to free a seat or add a license key, then sign in again." />,
+      <AuthForm noticeMessage="This invitation is no longer valid. You can still sign in to an existing account." />,
     );
 
-    expect(screen.getByText(/reached its licensed user limit/)).toBeVisible();
-    // Sign-in stays available: existing users are never blocked by the gate.
+    expect(screen.getByText(/invitation is no longer valid/)).toBeVisible();
+    // Sign-in stays available alongside the notice.
     fireEvent.click(
       screen.getByRole('button', { name: 'Continue with email' }),
     );

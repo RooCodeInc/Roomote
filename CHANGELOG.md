@@ -2,6 +2,19 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.22.0 (2026-11-17)
+
+Roomote 1.22.0 makes Roomote open source under the Apache License 2.0 and removes the self-hosted user limit.
+
+### Highlights
+
+- Roomote is now licensed under the Apache License 2.0.
+- Self-hosted deployments no longer have a 10-user limit or need a license key.
+
+### Minor changes
+
+- Roomote is now licensed under Apache 2.0, and self-hosted deployments no longer have a 10-user limit or need a license key.
+
 ## 1.21.0 (2026-11-14)
 
 Roomote 1.21.0 adds Claude Fable 5.2 recommendations, improves reliability for large histories and long-running services, and strengthens HTTP security.

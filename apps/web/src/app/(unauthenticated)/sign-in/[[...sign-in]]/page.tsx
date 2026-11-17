@@ -65,20 +65,12 @@ export default async function Page(props: {
     redirect(getSafeSignInRedirectPath(searchParams.redirect_url, '/'));
   }
 
-  // A visitor bounced here by the seat gate still holds their Better Auth
-  // session cookie, so re-running the auth evaluation identifies them and
-  // lets the form explain the rejection instead of silently offering
-  // sign-in again.
-  const seatLimitBlocked =
-    !authContext.success && authContext.reason === 'seat_limit';
-
   return (
     <SignInPageClient
       enabledProviders={enabledProviders}
       canSignUp={canSignUp}
       inviteRole={invite?.role ?? null}
       inviteInvalid={hasInvitedParam(searchParams.invited) && invite === null}
-      seatLimitBlocked={seatLimitBlocked}
       accountLinkHelpText={accountLinkHelpText}
       passwordResetAvailable={passwordResetAvailable}
     />

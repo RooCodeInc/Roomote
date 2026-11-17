@@ -34,7 +34,6 @@ const {
 
 vi.mock('@roomote/sdk/server/request-instance-ping', () => ({
   requestInstancePing: vi.fn(async () => undefined),
-  requestLicenseUsageSync: vi.fn(async () => undefined),
 }));
 
 vi.mock('next/headers', () => ({
@@ -42,7 +41,6 @@ vi.mock('next/headers', () => ({
 }));
 
 vi.mock('@roomote/db/server', () => ({
-  recordLicenseUsageObservation: vi.fn(async () => undefined),
   isBrainEnabled: vi.fn(async () => false),
   db: {
     query: {
@@ -69,6 +67,9 @@ vi.mock('@roomote/db/server', () => ({
       const tx = {
         select: vi.fn(() => ({
           from: vi.fn(() => ({
+            where: vi.fn(() => ({
+              for: vi.fn(async () => [{ id: 'default' }]),
+            })),
             limit: vi.fn(async () =>
               mockTxState.anyUser ? [mockTxState.anyUser] : [],
             ),
@@ -140,11 +141,6 @@ vi.mock('./access-policy', () => ({
 vi.mock('./invites', () => ({
   InviteRedemptionFailedError: class InviteRedemptionFailedError extends Error {},
   redeemInvite: vi.fn(async () => true),
-}));
-
-vi.mock('./license', () => ({
-  SeatLimitExceededError: class SeatLimitExceededError extends Error {},
-  assertSeatAvailable: vi.fn(async () => undefined),
 }));
 
 import { authorize } from './auth-context';

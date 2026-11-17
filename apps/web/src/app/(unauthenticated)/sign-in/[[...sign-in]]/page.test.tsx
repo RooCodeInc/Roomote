@@ -107,7 +107,6 @@ describe('Sign-in page', () => {
         canSignUp: false,
         inviteRole: null,
         inviteInvalid: false,
-        seatLimitBlocked: false,
         accountLinkHelpText: null,
         passwordResetAvailable: false,
       },

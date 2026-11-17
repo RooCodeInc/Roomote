@@ -173,8 +173,7 @@ copy-pasting.
   or bring API keys from any supported provider. Switch models per task. No
   markup on tokens.
 - **Read every line.** The full source is here. Audit it, extend it, fork it.
-- **Free for up to 10 users.** Need more? [Contact Roomote about a
-  self-hosted license](mailto:help@roomote.dev).
+- **Apache 2.0.** Open source under a permissive license.
 
 ---
 
@@ -206,12 +205,8 @@ Need SSO, custom SLAs, or dedicated support? Get in touch:
 ## FAQ
 
 **Is Roomote open source?**
-It is source-available under the [Fair Core License 1.0](LICENSE) (FCL-1.0-ALv2).
-You can read, modify, and self-host the code. Free for up to 10 users. Larger
-deployments need a license. Email
-[help@roomote.dev](mailto:help@roomote.dev) for a self-hosted license.
-After the license period, the code
-converts to Apache 2.0.
+Yes. Roomote is licensed under the [Apache License 2.0](LICENSE). You can read,
+modify, and self-host the code.
 
 **How is this different from Cursor / Copilot / Claude Code?**
 Those are IDE tools that help you write code faster in your editor. Roomote is a
@@ -247,10 +242,8 @@ Modal, E2B, Daytona, Blaxel, and Local Docker.
 GitHub, GitLab, Gitea, Azure DevOps, and Bitbucket Cloud. Connect one or many.
 
 **What does it cost?**
-Self-hosting is free for up to 10 registered users. You pay your own model
-provider for tokens (or use the models bundled with your ChatGPT subscription).
-For more than 10 users, contact Roomote about a self-hosted license at
-[help@roomote.dev](mailto:help@roomote.dev).
+Self-hosting is free. You pay your own model provider for
+tokens (or use the models bundled with your ChatGPT subscription).
 
 **I already pay for ChatGPT Plus. Do I need an API key too?**
 No. Connect your ChatGPT account and you can start using Roomote immediately.
@@ -279,7 +272,7 @@ code. "Fix the typo on the pricing page" works.
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) and the [CLA](CLA.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Security
 
@@ -287,10 +280,5 @@ Report vulnerabilities privately. See [SECURITY.md](SECURITY.md).
 
 ## License
 
-[Fair Core License 1.0 (FCL-1.0-ALv2)](LICENSE). Free for up to 10 users.
-For a self-hosted license, contact
-[help@roomote.dev](mailto:help@roomote.dev). Purchased licenses report their
-current user count for subscription billing. Refresh purchased keys annually in
-your existing license account, then replace the key in Settings or `R_LICENSE_KEY`.
-The license key functionality may not be disabled or circumvented.
-[TRADEMARKS.md](TRADEMARKS.md) covers trademark usage.
+[Apache License 2.0](LICENSE). The license does not grant rights to the Roomote
+name or logo; [TRADEMARKS.md](TRADEMARKS.md) covers trademark usage.

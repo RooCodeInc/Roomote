@@ -973,37 +973,9 @@ Backups should include at minimum:
 - Any Docker worker containers you intentionally keep for debugging are
   ephemeral task runtime state, not source-of-truth data.
 
-## License And Seats
+## License
 
-Roomote is licensed under the Fair Core License 1.0 (FCL-1.0-ALv2, see
-[LICENSE](LICENSE)). A deployment is **free for up to 10 users** — every
-registered user account counts toward the limit, whichever sign-in path or
-surface it uses. Removing a user frees their seat.
-
-To go beyond 10 users, [contact Roomote for a self-hosted
-license](mailto:help@roomote.dev) and apply its key in either of these
-ways:
-
-- Enter it in **Settings → Users → License** as an admin, or
-- Set `R_LICENSE_KEY` in the deployment environment (for example
-  `.env.production` / Compose). When set, the env var takes precedence over
-  any key stored in Settings.
-
-Purchased keys are issued annually. While the subscription is active, refresh
-the key in your existing license account and replace the value in Settings or
-`R_LICENSE_KEY` before its displayed expiry date. Keys are verified offline;
-usage reporting does not activate or validate them.
-
-Licensed deployments report the license ID and current registered-user count to
-Roomote's Ping service for subscription billing, even when anonymous analytics
-is disabled. Other instance statistics remain controlled by the anonymous
-analytics setting. Contact [help@roomote.dev](mailto:help@roomote.dev) for teams
-larger than 100 users.
-
-When a deployment is at its seat limit, existing users are unaffected — only
-new sign-ups are blocked until a seat is freed (Settings → Users → remove a
-user) or a license key with more seats is added. Per the license terms, the
-license key functionality may not be disabled or circumvented.
+Roomote is licensed under the [Apache License 2.0](LICENSE).
 
 ## Current Limits
 

@@ -46,8 +46,6 @@ export type AuthorizedUser = {
 export type AuthError = {
   success: false;
   error: string;
-  /** Machine-readable cause for failures the UI treats specially. */
-  reason?: 'seat_limit';
 };
 
 export type UserAuthSuccess = {

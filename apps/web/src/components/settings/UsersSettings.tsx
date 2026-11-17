@@ -5,7 +5,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
 import { useAuthorizedUser } from '@/hooks/useUser';
-import { useTelemetry } from '@/hooks/useTelemetry';
 import { useTRPC } from '@/trpc/client';
 import {
   AlertCircle,
@@ -27,7 +26,6 @@ import {
   LucideLink,
   Mails,
   RotateCcwKey,
-  ScrollText,
   Select,
   SelectContent,
   SelectItem,
@@ -41,11 +39,6 @@ import {
 import { Section } from '@/components/settings';
 import { AccountLinkHelpSection } from './AccountLinkHelpSection';
 import { formatDistanceToNow } from 'date-fns';
-
-const LICENSE_PURCHASE_URL =
-  'mailto:help@roomote.dev?subject=Roomote%20self-hosted%20license';
-const LICENSE_PORTAL_URL = 'https://cloud.roomote.dev/';
-const LICENSE_EXPIRY_WARNING_MS = 30 * 24 * 60 * 60 * 1000;
 
 function formatJoinedDate(value: Date | string | null): string {
   if (!value) {
@@ -78,8 +71,7 @@ function formatRelative(value: Date | string | null): string {
 export function UsersSettings() {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
-  const { userId: currentUserId, cloudEnabled } = useAuthorizedUser();
-  const { capture } = useTelemetry();
+  const { userId: currentUserId } = useAuthorizedUser();
   const settingsQueryKey = trpc.accessPolicy.get.queryKey();
   const settingsQuery = useQuery(trpc.accessPolicy.get.queryOptions());
   const [label, setLabel] = useState('');
@@ -103,7 +95,6 @@ export function UsersSettings() {
     id: string;
     name: string;
   } | null>(null);
-  const [licenseKeyInput, setLicenseKeyInput] = useState('');
 
   const createInvite = useMutation(
     trpc.accessPolicy.createInvite.mutationOptions({
@@ -192,20 +183,6 @@ export function UsersSettings() {
       },
     }),
   );
-  const setLicenseKey = useMutation(
-    trpc.accessPolicy.setLicenseKey.mutationOptions({
-      onSuccess: async (_result, variables) => {
-        setLicenseKeyInput('');
-        toast.success(
-          variables.licenseKey ? 'License key saved.' : 'License key removed.',
-        );
-        await queryClient.invalidateQueries({ queryKey: settingsQueryKey });
-      },
-      onError: (error) => {
-        toast.error(error.message);
-      },
-    }),
-  );
   const createPasswordResetLink = useMutation(
     trpc.accessPolicy.createPasswordResetLink.mutationOptions({
       onSuccess: async (result) => {
@@ -249,72 +226,21 @@ export function UsersSettings() {
     hasMicrosoftSignIn,
     invites,
     users: members,
-    license,
   } = settingsQuery.data;
   const adminCount = members.filter((member) => member.role === 'admin').length;
   const visibleInvites = invites.filter(
     (invite) => invite.revokedAt == null && invite.usedCount < invite.maxUses,
   );
-  const seatsRemaining = license.seatLimit - license.seatsUsed;
-  const isAtSeatCapacity = seatsRemaining <= 0;
-  const purchasedLicenseExpiringSoon =
-    license.status === 'valid' &&
-    license.licenseId?.startsWith('lic_sh_') === true &&
-    license.expiresAt != null &&
-    new Date(license.expiresAt).getTime() - Date.now() <=
-      LICENSE_EXPIRY_WARNING_MS;
   const parsedMaxUses = Number(maxUses);
   const maxUsesIsValid =
     maxUses.trim() !== '' &&
     Number.isInteger(parsedMaxUses) &&
     parsedMaxUses >= 1 &&
     parsedMaxUses <= 1000;
-  const licenseBadge =
-    license.status === 'valid' ? (
-      <Badge variant="success">Licensed</Badge>
-    ) : license.status === 'expired' ? (
-      <Badge variant="warning">License expired</Badge>
-    ) : license.status === 'invalid' ? (
-      <Badge variant="destructive">Invalid license key</Badge>
-    ) : (
-      <Badge variant="secondary">Free tier</Badge>
-    );
-
-  const handleSaveLicenseKey = (event?: FormEvent<HTMLFormElement>) => {
-    event?.preventDefault();
-
-    const licenseKey = licenseKeyInput.trim();
-
-    if (!licenseKey || setLicenseKey.isPending) {
-      return;
-    }
-
-    setLicenseKey.mutate({ licenseKey });
-  };
-
-  const licensePurchaseButton = (
-    <Button asChild size="sm" variant="outline">
-      <a
-        href={LICENSE_PURCHASE_URL}
-        target="_blank"
-        rel="noreferrer"
-        onClick={() =>
-          capture('license_purchase_cta_clicked', {
-            seatsUsed: license.seatsUsed,
-            seatLimit: license.seatLimit,
-            licenseStatus: license.status,
-          })
-        }
-      >
-        Contact Roomote for a license
-      </a>
-    </Button>
-  );
-
   const handleCreate = (event?: FormEvent<HTMLFormElement>) => {
     event?.preventDefault();
 
-    if (createInvite.isPending || isAtSeatCapacity || !maxUsesIsValid) {
+    if (createInvite.isPending || !maxUsesIsValid) {
       return;
     }
 
@@ -327,115 +253,6 @@ export function UsersSettings() {
 
   return (
     <div className="space-y-6">
-      {cloudEnabled ? null : (
-        <Section icon={ScrollText} title="License">
-          <div className="space-y-4">
-            <div className="flex items-center gap-2 text-sm">
-              {licenseBadge}
-              <p>
-                {license.seatsUsed} of {license.seatLimit} seats used
-                {license.licensee ? (
-                  <span className="text-muted-foreground">
-                    {' '}
-                    · Licensed to {license.licensee}
-                    {license.expiresAt
-                      ? ` · Expires ${formatJoinedDate(license.expiresAt)}`
-                      : ''}
-                  </span>
-                ) : null}
-              </p>
-            </div>
-
-            {seatsRemaining <= 1 ? (
-              <div className="flex flex-col items-start gap-3 rounded-lg border border-warning/30 bg-warning/5 p-3 text-sm sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex items-start gap-2">
-                  <AlertCircle className="mt-0.5 size-4 shrink-0" />
-                  <p>
-                    {seatsRemaining <= 0
-                      ? 'All seats are in use. New users cannot sign in until a seat is freed or the license limit is raised.'
-                      : 'One seat remaining. Buy a license before inviting more users.'}
-                  </p>
-                </div>
-                {licensePurchaseButton}
-              </div>
-            ) : (
-              <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center">
-                <p className="text-sm text-muted-foreground">
-                  Need more than {license.freeSeatLimit} users?
-                </p>
-                {licensePurchaseButton}
-              </div>
-            )}
-
-            {purchasedLicenseExpiringSoon ? (
-              <div className="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/5 p-3 text-sm">
-                <AlertCircle className="mt-0.5 size-4 shrink-0" />
-                <p>
-                  This license expires soon.{' '}
-                  <a
-                    className="font-medium underline underline-offset-4"
-                    href={LICENSE_PORTAL_URL}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Refresh the key in your license account
-                  </a>{' '}
-                  and replace it here before it expires.
-                </p>
-              </div>
-            ) : null}
-
-            {license.fromEnv ? (
-              <p className="text-sm text-muted-foreground">
-                License key is provided by the{' '}
-                <span className="font-mono">R_LICENSE_KEY</span> environment
-                variable. Update or remove that env var and restart the
-                deployment to change it.
-              </p>
-            ) : (
-              <form
-                className="flex flex-col gap-3 md:flex-row md:items-end items-start max-w-2xl"
-                onSubmit={handleSaveLicenseKey}
-              >
-                <div className="flex-1 space-y-2">
-                  <Label htmlFor="license-key">License key</Label>
-                  <Input
-                    id="license-key"
-                    value={licenseKeyInput}
-                    placeholder="RMLK1.…"
-                    onChange={(event) => setLicenseKeyInput(event.target.value)}
-                    disabled={setLicenseKey.isPending}
-                  />
-                </div>
-                <Button
-                  type="submit"
-                  disabled={setLicenseKey.isPending || !licenseKeyInput.trim()}
-                >
-                  {setLicenseKey.isPending ? <Spinner /> : null}
-                  Save key
-                </Button>
-                {license.status !== 'unlicensed' ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => setLicenseKey.mutate({ licenseKey: null })}
-                    disabled={setLicenseKey.isPending}
-                  >
-                    Remove key
-                  </Button>
-                ) : null}
-              </form>
-            )}
-            <p className="text-sm text-muted-foreground">
-              Deployments are free for up to {license.freeSeatLimit} users. A
-              self-hosted license unlocks more seats. Apply it here or set{' '}
-              <span className="font-mono">R_LICENSE_KEY</span> in the deployment
-              environment.
-            </p>
-          </div>
-        </Section>
-      )}
-
       <Section icon={Mails} title="Invites">
         <div className="space-y-2">
           <p>Sign up/sign in is currently available to:</p>
@@ -547,9 +364,7 @@ export function UsersSettings() {
             </div>
             <Button
               type="submit"
-              disabled={
-                createInvite.isPending || isAtSeatCapacity || !maxUsesIsValid
-              }
+              disabled={createInvite.isPending || !maxUsesIsValid}
             >
               {createInvite.isPending ? <Spinner /> : null}
               Create invite

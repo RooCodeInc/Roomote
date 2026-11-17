@@ -1,6 +1,5 @@
 const mocks = vi.hoisted(() => ({
   findSettings: vi.fn(),
-  getDeploymentLicenseState: vi.fn(),
   getInstanceAnalyticsId: vi.fn(),
   isAnonymousAnalyticsEnabledFromMetadata: vi.fn(),
 }));
@@ -24,7 +23,6 @@ vi.mock('@roomote/db/server', () => ({
   },
   deploymentSettings: { id: 'id' },
   eq: vi.fn(),
-  getDeploymentLicenseState: mocks.getDeploymentLicenseState,
   getInstanceAnalyticsId: mocks.getInstanceAnalyticsId,
   getUserAnalyticsId: vi.fn(),
   taskRuns: {},
@@ -53,34 +51,7 @@ describe('sendInstanceReport', () => {
     vi.unstubAllGlobals();
   });
 
-  it('does not send licensed usage to Ping when analytics is disabled', async () => {
-    mocks.getDeploymentLicenseState.mockResolvedValue({
-      status: 'valid',
-      seatLimit: 100,
-      licenseId: 'lic_sh_123',
-      licensee: 'Engineering',
-      maxSeats: 100,
-      issuedAt: new Date('2026-01-01T00:00:00Z'),
-      expiresAt: new Date('2027-01-01T00:00:00Z'),
-    });
-
-    await expect(sendInstanceReport({ users: { total: 17 } })).resolves.toBe(
-      false,
-    );
-    expect(fetch).not.toHaveBeenCalled();
-  });
-
-  it('does not report an expired license after analytics opt-out', async () => {
-    mocks.getDeploymentLicenseState.mockResolvedValue({
-      status: 'expired',
-      seatLimit: 10,
-      licenseId: 'lic_sh_123',
-      licensee: 'Engineering',
-      maxSeats: 100,
-      issuedAt: new Date('2025-01-01T00:00:00Z'),
-      expiresAt: new Date('2026-01-01T00:00:00Z'),
-    });
-
+  it('does not send a report when analytics is disabled', async () => {
     await expect(sendInstanceReport({ users: { total: 17 } })).resolves.toBe(
       false,
     );

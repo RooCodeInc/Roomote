@@ -50,7 +50,6 @@ x-roomote-env: &roomote-env
   PREVIEW_DOMAINS: ${PREVIEW_DOMAINS:-localhost,127.0.0.1,roomotepreview.localhost}
   R_PUBLIC_URL: ${R_PUBLIC_URL:-}
   R_ALLOWED_EMAILS: ${R_ALLOWED_EMAILS:-}
-  R_LICENSE_KEY: ${R_LICENSE_KEY:-}
   R_MODEL: ${R_MODEL:-}
   # Decision model. Unset, a deployment uses Jev when a TypeSafe key is
   # configured and otherwise none. R_JUDGMENT_UPSTREAM_URL points at any

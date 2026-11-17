@@ -92,23 +92,8 @@ review-only and must not be merged. See the
 for preparation, approval, dispatch, and post-push monitoring. This procedure
 does not merge the Promote PR, tag, publish, or deploy a release.
 
-## Contributor License Agreement
-
-All contributors are required to sign the Roomote
-[Contributor License Agreement](CLA.md) before their pull requests can be
-merged.
-
-Signing is handled automatically on your first pull request: the CLA Assistant
-bot posts a comment with instructions, and you sign by replying with:
-
-```text
-I have read the CLA Document and I hereby sign the CLA
-```
-
-You only need to sign once; your signature applies to all your future
-contributions to this repository.
-
 ## License
 
-By contributing, you agree that your contribution is licensed under the same
-license as the repository. See `LICENSE`.
+Roomote is licensed under the Apache License 2.0. As described in section 5 of
+that license, contributions you submit are licensed under the same terms. See
+`LICENSE`.

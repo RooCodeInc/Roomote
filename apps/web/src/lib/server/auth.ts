@@ -1,7 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 
 import { betterAuth } from 'better-auth';
-import { APIError } from 'better-auth/api';
 import { nextCookies } from 'better-auth/next-js';
 import { genericOAuth, slack } from 'better-auth/plugins';
 import { drizzleAdapter } from '@better-auth/drizzle-adapter';
@@ -39,7 +38,6 @@ import {
   isNewAuthUserEmailAllowed,
   isSignInAllowedByAccessPolicy,
 } from './access-policy';
-import { hasSeatAvailable } from './license';
 import {
   extractInviteTokenFromRequest,
   runWithInviteContext,
@@ -1219,17 +1217,6 @@ async function createAuth(authProviderConfig: ResolvedAuthProviderConfig) {
 
             if (!allowed) {
               return false;
-            }
-
-            // Seat gate at sign-up time: rejecting here keeps the visitor on
-            // the sign-up form with this message and creates no auth user.
-            // Advisory only — the authoritative, serialized gate runs in the
-            // app-user admission transaction (assertSeatAvailable).
-            if (!(await hasSeatAvailable())) {
-              throw new APIError('FORBIDDEN', {
-                message:
-                  'This deployment has reached its licensed user limit. Ask an admin to free a seat or add a license key.',
-              });
             }
 
             return true;

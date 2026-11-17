@@ -40,8 +40,7 @@
 #   are entered in the /setup wizard after first boot and stored encrypted
 #   in Postgres. Auth keypairs come from R_AUTO_GENERATE_KEYS=true.
 #   The optional deploy-time prompts are R_APP_URL on api (see the annotation
-#   on that variable), for deployers who already own a domain, and
-#   R_LICENSE_KEY, for operators provisioning a paid-seat license. Override
+#   on that variable), for deployers who already own a domain. Override
 #   the pre-filled R_APP_URL default with https://<their-domain> before the
 #   first deploy instead of editing the variable after hitting 403 "Invalid
 #   origin" errors.
@@ -204,8 +203,6 @@ services:
       ENCRYPTION_KEY: ${{secret(32)}}
       # Transport secret between BullMQ Discord Gateway and API.
       R_DISCORD_GATEWAY_SECRET: ${{secret(32)}}
-      # Optional paid-seat license key; takes precedence over Settings > Users.
-      R_LICENSE_KEY: ''
       R_DISCORD_BOT_TOKEN: '' # optional; Discord can also be configured after boot in Settings
       ARTIFACT_SIGNING_KEY: ${{secret(32)}}
       DASHBOARD_PASSWORD: ${{secret(24)}}
@@ -308,7 +305,6 @@ services:
       R_AUTO_GENERATE_KEYS: ${{api.R_AUTO_GENERATE_KEYS}}
       ENCRYPTION_KEY: ${{api.ENCRYPTION_KEY}}
       R_DISCORD_GATEWAY_SECRET: ${{api.R_DISCORD_GATEWAY_SECRET}}
-      R_LICENSE_KEY: ${{api.R_LICENSE_KEY}}
       R_DISCORD_BOT_TOKEN: ${{api.R_DISCORD_BOT_TOKEN}}
       ARTIFACT_SIGNING_KEY: ${{api.ARTIFACT_SIGNING_KEY}}
       DASHBOARD_PASSWORD: ${{api.DASHBOARD_PASSWORD}}

@@ -1,7 +1,7 @@
 {
   "name": "roomote",
-  "version": "1.21.0",
-  "license": "FCL-1.0-ALv2",
+  "version": "1.22.0",
+  "license": "Apache-2.0",
   "packageManager": "pnpm@10.29.3",
   "engines": {
     "node": "^22.23.4 || ^24.22.1",

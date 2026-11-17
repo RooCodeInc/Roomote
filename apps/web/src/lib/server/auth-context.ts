@@ -7,7 +7,6 @@ import {
   eq,
   invites,
   isBrainEnabled,
-  recordLicenseUsageObservation,
   users,
 } from '@roomote/db/server';
 import type { UserRole } from '@roomote/types';
@@ -16,10 +15,7 @@ import {
   normalizeMetadataRecord,
 } from '@roomote/feature-flags';
 import { getManagedDeploymentAccessFromMetadata } from '@roomote/types';
-import {
-  requestInstancePing,
-  requestLicenseUsageSync,
-} from '@roomote/sdk/server/request-instance-ping';
+import { requestInstancePing } from '@roomote/sdk/server/request-instance-ping';
 import { isTelemetryEnvAllowed } from '@roomote/telemetry/server';
 
 import {
@@ -42,7 +38,6 @@ import {
   seedDeploymentAccessPolicyIfNeeded,
 } from './access-policy';
 import { InviteRedemptionFailedError, redeemInvite } from './invites';
-import { assertSeatAvailable, SeatLimitExceededError } from './license';
 
 const DEFAULT_DEPLOYMENT_ID = 'default';
 
@@ -163,9 +158,13 @@ async function ensureDeploymentIdentity({
     // requests conflict on the insert and skip redemption), and a failed
     // insert can never burn an invite use.
     role = await db.transaction(async (tx) => {
-      // Seat gate (license key functionality under FCL-1.0-ALv2): admission
-      // is only allowed below the deployment's seat limit.
-      await assertSeatAvailable(tx);
+      // Lock the settings row so concurrent admissions serialize and only
+      // one of them can become the founding admin.
+      await tx
+        .select({ id: deploymentSettings.id })
+        .from(deploymentSettings)
+        .where(eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID))
+        .for('update');
 
       // The deployment's first user is its founding admin; everyone after
       // joins with their invite's role, or as a member for org-membership
@@ -215,7 +214,6 @@ async function ensureDeploymentIdentity({
       }
 
       if (!invitedByInviteId) {
-        await recordLicenseUsageObservation(tx, now);
         return insertRole;
       }
 
@@ -225,7 +223,6 @@ async function ensureDeploymentIdentity({
         throw new InviteRedemptionFailedError();
       }
 
-      await recordLicenseUsageObservation(tx, now);
       return insertRole;
     });
 
@@ -234,7 +231,6 @@ async function ensureDeploymentIdentity({
     // A new admission changes the instance's user counts; refresh the
     // anonymous report instead of waiting for the daily tick.
     void requestInstancePing('user-admitted');
-    void requestLicenseUsageSync('user-admitted');
   } else {
     // Removal deletes the Better Auth user, so a removed user normally can
     // never reach this branch again. If a soft-deleted row's auth user still
@@ -263,20 +259,10 @@ async function ensureDeploymentIdentity({
     };
 
     if (isRestoring) {
-      // Restoring a soft-deleted row re-occupies a seat, so it passes the
-      // same serialized gate as a new admission: the seat check and the
-      // deletedAt-clearing update commit atomically, with the settings row
-      // locked so a concurrent admission cannot pass the gate alongside it.
-      await db.transaction(async (tx) => {
-        await assertSeatAvailable(tx);
-
-        await tx
-          .update(users)
-          .set({ ...profileUpdate, deletedAt: null, role })
-          .where(eq(users.id, userId));
-        await recordLicenseUsageObservation(tx, now);
-      });
-      void requestLicenseUsageSync('user-restored');
+      await db
+        .update(users)
+        .set({ ...profileUpdate, deletedAt: null, role })
+        .where(eq(users.id, userId));
     } else if (
       existingUser.name !== name ||
       existingUser.email !== email ||
@@ -391,15 +377,6 @@ export async function getSignedInAuthContext(
       return {
         success: false,
         error: 'Unauthorized: Invite is no longer valid',
-      };
-    }
-
-    if (error instanceof SeatLimitExceededError) {
-      return {
-        success: false,
-        error:
-          'Unauthorized: This deployment has reached its licensed user limit',
-        reason: 'seat_limit',
       };
     }
 
