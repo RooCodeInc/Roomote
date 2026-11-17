@@ -24,8 +24,10 @@ ZAI_API_KEY=...
 ZAI_REGION=global # or china
 ```
 
-Both values are required. Models use the `zai/` prefix; Roomote can also map a
-supported GLM image-capable model to the media role. Check audio and video input
+The configuration form requires a region selection. For environment-variable
+configuration, `ZAI_REGION` defaults to `global` when unset; set it to `china`
+for a BigModel key. Models use the `zai/` prefix; Roomote can also map a
+supported GLM image-capable model to the vision role. Check audio and video input
 support separately if you use those attachments.
 
 ## Cost behavior

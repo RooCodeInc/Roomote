@@ -41,5 +41,8 @@ on [ChatGPT pricing](https://chatgpt.com/pricing).
   flow with the same eligible ChatGPT account.
 - **Usage is not displayed.** The unofficial usage endpoint may be unavailable;
   this does not necessarily mean model access is disconnected.
-- **A plan limit is reached.** Wait for the displayed window to reset or connect
-  the OpenAI API provider for separately billed capacity.
+- **A plan limit is reached.** Wait for the displayed window to reset, or connect
+  the [OpenAI API provider](/providers/inference/openai) and disconnect ChatGPT
+  Subscription to use separately billed capacity. Connecting an API key alone
+  does not change the route: the subscription takes precedence for `openai/`
+  models while both are connected.
