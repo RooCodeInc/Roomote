@@ -23,7 +23,11 @@ export async function listPinnedTaskIdsCommand(auth: UserAuthSuccess) {
     .from(taskPins)
     .innerJoin(tasks, eq(tasks.id, taskPins.taskId))
     .where(
-      and(eq(taskPins.userId, auth.userId), customAutomationTaskAccess(auth)),
+      and(
+        eq(taskPins.userId, auth.userId),
+        isNull(tasks.deletedAt),
+        customAutomationTaskAccess(auth),
+      ),
     )
     .orderBy(desc(taskPins.updatedAt));
 }
@@ -81,7 +85,8 @@ export async function setTaskPinnedCommand(
   const [pinCountResult] = await db
     .select({ value: count() })
     .from(taskPins)
-    .where(eq(taskPins.userId, auth.userId))
+    .innerJoin(tasks, eq(tasks.id, taskPins.taskId))
+    .where(and(eq(taskPins.userId, auth.userId), isNull(tasks.deletedAt)))
     .limit(1);
 
   if ((pinCountResult?.value ?? 0) >= MAX_PINNED_TASKS) {
