@@ -584,7 +584,6 @@ import {
   getMiscSettingsCommand,
   setSessionDoneWebhookCommand,
   setDeploymentTimeZoneCommand,
-  setAnonymousAnalyticsCommand,
 } from '../commands/misc-settings';
 import {
   backfillBrainTaskMemoriesCommand,
@@ -3028,7 +3027,6 @@ export const appRouter = createRouter({
       .input(
         z
           .object({
-            anonymousAnalyticsEnabled: z.boolean().optional(),
             productUpdatesEnabled: z.boolean().optional(),
           })
           .optional(),
@@ -3044,7 +3042,6 @@ export const appRouter = createRouter({
           selectedStarterTaskIds: z
             .array(z.enum(SETUP_STARTER_TASK_IDS))
             .max(SETUP_STARTER_TASK_IDS.length),
-          anonymousAnalyticsEnabled: z.boolean().optional(),
           productUpdatesEnabled: z.boolean().optional(),
         }),
       )
@@ -3924,15 +3921,6 @@ export const appRouter = createRouter({
       getMiscSettingsCommand(auth),
     ),
 
-    setAnonymousAnalytics: protectedProcedure
-      .input(
-        z.object({
-          enabled: z.boolean(),
-        }),
-      )
-      .mutation(({ ctx: { auth }, input }) =>
-        setAnonymousAnalyticsCommand(auth, input),
-      ),
     setTimeZone: protectedProcedure
       .input(z.object({ timeZone: z.string().trim().min(1).max(100) }))
       .mutation(({ ctx: { auth }, input }) =>

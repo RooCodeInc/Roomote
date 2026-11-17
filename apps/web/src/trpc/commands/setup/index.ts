@@ -28,7 +28,6 @@ import {
   captureActivationSetupCompleted,
   captureEvent,
 } from '@roomote/telemetry/server';
-import { ANONYMOUS_ANALYTICS_METADATA_KEY } from '@roomote/feature-flags';
 import {
   AVAILABLE_SETUP_MCP_INTEGRATIONS,
   enqueueTask,
@@ -415,7 +414,6 @@ async function sendSetupCompletionMcpRecommendations(
 export async function completeSetupCommand(
   auth: UserAuthSuccess,
   input?: {
-    anonymousAnalyticsEnabled?: boolean;
     productUpdatesEnabled?: boolean;
   },
   options?: {
@@ -436,13 +434,9 @@ export async function completeSetupCommand(
       sql`SELECT pg_advisory_xact_lock(hashtext('setup-recommendation-dispatch'))`,
     );
 
-    // Persist the StepInvoke anonymous-analytics choice alongside setup
-    // completion when the wizard provided one (opt-out: default stays
-    // enabled when the field is absent).
     const existingSettings = await tx.query.deploymentSettings.findFirst({
       where: eq(deploymentSettings.id, 'default'),
       columns: {
-        metadata: true,
         setupNewState: true,
         setupCompletedAt: true,
         brainEnabled: true,
@@ -466,11 +460,7 @@ export async function completeSetupCommand(
     const recommendationsWereReviewed =
       normalizeSetupNewState(existingSettings?.setupNewState ?? {})
         .automationRecommendations?.status === 'ready';
-    let metadataUpdate: Record<string, unknown> | undefined;
     const cloudEnabled = isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED);
-    const anonymousAnalyticsEnabled = cloudEnabled
-      ? true
-      : input?.anonymousAnalyticsEnabled;
     // Setup completion is the shared creation boundary. Default only unfinished
     // Cloud deployments so existing instances and explicit choices stay intact.
     const brainEnabledDefault =
@@ -479,26 +469,12 @@ export async function completeSetupCommand(
       existingSettings?.brainEnabled == null
         ? true
         : undefined;
-    if (anonymousAnalyticsEnabled !== undefined) {
-      const existingMetadata =
-        existingSettings?.metadata &&
-        typeof existingSettings.metadata === 'object' &&
-        !Array.isArray(existingSettings.metadata)
-          ? { ...(existingSettings.metadata as Record<string, unknown>) }
-          : {};
-      metadataUpdate = {
-        ...existingMetadata,
-        [ANONYMOUS_ANALYTICS_METADATA_KEY]: anonymousAnalyticsEnabled,
-      };
-    }
-
     await Promise.all([
       tx
         .insert(deploymentSettings)
         .values({
           id: 'default',
           setupCompletedAt: now,
-          ...(metadataUpdate ? { metadata: metadataUpdate } : {}),
           ...(brainEnabledDefault === undefined
             ? {}
             : { brainEnabled: brainEnabledDefault }),
@@ -508,7 +484,6 @@ export async function completeSetupCommand(
           set: {
             setupCompletedAt: now,
             updatedAt: now,
-            ...(metadataUpdate ? { metadata: metadataUpdate } : {}),
             // Evaluate under the conflict row lock so a concurrent explicit
             // Memory choice wins over this setup default.
             ...(brainEnabledDefault === undefined

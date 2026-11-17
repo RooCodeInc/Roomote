@@ -1777,9 +1777,6 @@ importers:
       '@roomote/env':
         specifier: workspace:^
         version: link:../env
-      '@roomote/feature-flags':
-        specifier: workspace:^
-        version: link:../feature-flags
     devDependencies:
       '@roomote/config-typescript':
         specifier: workspace:^

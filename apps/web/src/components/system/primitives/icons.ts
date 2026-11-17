@@ -65,7 +65,6 @@ export {
   DollarSign,
   Drum,
   Download,
-  EarOff,
   ExternalLink,
   Eye,
   EyeOff,
