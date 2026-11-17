@@ -71,42 +71,6 @@ Signing out, removal by an admin, and password resets still revoke sessions.
 Clearing browser cookies or rotating the deployment's session-signing secret
 also requires signing in again. Sign out when using a shared device.
 
-## License and seats
-
-A Roomote deployment is free for up to 10 users. Every registered user
-account in the deployment counts toward the limit, whichever sign-in path or
-surface they use. Removed users free their seat.
-
-To add more than 10 users, [contact Roomote for a self-hosted
-license](mailto:help@roomote.dev), then apply its key in either of these
-ways:
-
-- enter it in **Settings > Users > License** as an admin, or
-- set `R_LICENSE_KEY` on the deployment (for example in Compose / `.env.production`);
-  when that env var is set, it takes precedence over any key stored in Settings
-
-The License section shows the current seat usage, license status, licensee, and
-expiry date. Purchased keys are issued annually and can be refreshed from the
-existing license account while the subscription is active. Replace the key in
-Settings or `R_LICENSE_KEY` after refreshing it.
-
-Keys are signature-verified locally. On self-hosted deployments, they are then
-activated with Roomote's licensing service for the deployment's stable installation ID. A
-paid seat limit remains active while the activation lease is current (up
-to 72 hours); without it, the deployment uses the free-seat limit. Managed
-deployments use their provisioned valid license directly. Roomote
-records the current user count and short-lived peaks for subscription billing,
-independently of anonymous analytics. License usage is not sent to the Ping
-analytics service.
-
-Each license may be active on one deployment at a time. If you move a
-deployment, contact Roomote support to reset the existing activation before
-using its license key on the replacement.
-
-When all seats are in use, existing users keep working normally — only new
-sign-ups are blocked until a seat is freed by removing a user or a license key
-with more seats is added.
-
 ## Create invites
 
 Admins create invites from **Settings > Users**.
@@ -188,8 +152,6 @@ provider, reset their password in that provider instead.
 
 - **A new teammate cannot create an account.** Send them an invite link, or
   confirm they belong to the configured Slack workspace or Microsoft tenant.
-  If they see a message about the licensed user limit, the deployment is out
-  of seats — free one up or add a license key under **Settings > Users**.
 - **The invite link no longer works.** It may be expired, revoked, or used up.
   Create a new invite from **Settings > Users**.
 - **The password reset action is disabled.** The user is OAuth-only. Reset their

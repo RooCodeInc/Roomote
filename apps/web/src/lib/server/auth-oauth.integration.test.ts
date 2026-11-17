@@ -20,7 +20,6 @@ vi.mock('./access-policy', () => ({
   isNewAuthUserEmailAllowed: async () => true,
   isSignInAllowedByAccessPolicy: async () => true,
 }));
-vi.mock('./license', () => ({ hasSeatAvailable: async () => true }));
 
 import { resolveAuthProviderConfig } from './auth-provider-config';
 import { handleAuthRequest } from './auth';

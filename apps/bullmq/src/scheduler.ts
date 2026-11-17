@@ -40,7 +40,6 @@ import {
   rebuildRetiredSnapshotsJob,
   pullRequestAnalyticsSyncJob,
   instancePingJob,
-  licenseUsageSyncJob,
   webhookCleanupJob,
   standbyRetentionJob,
   prReviewNotificationDispatchJob,
@@ -72,6 +71,9 @@ const RETIRED_JOB_SCHEDULER_NAMES = [
   'CiFailureTriage',
   'ProviderUsageLimitCheck',
   'SessionDoneWebhookDelivery',
+  // Self-hosted license usage reporting, removed with the seat limit.
+  'LicenseUsageSync',
+  'LicenseUsageHeartbeat',
 ] as const;
 
 type ScheduledJob = Job<unknown, void, string>;
@@ -216,28 +218,10 @@ async function createJobs(queue: Queue): Promise<void> {
   );
 
   await queue.upsertJobScheduler(
-    ScheduledJobName.LicenseUsageSync,
-    { every: 15 * 60 * 1000 }, // Drain durable usage observations promptly.
-  );
-
-  await queue.upsertJobScheduler(
     ScheduledJobName.PrReviewNotificationDispatch,
     // Terminal Roomote summaries wake the durable drain immediately. This
     // minute-level repair cadence is only for delayed and recovered work.
     { every: 60 * 1000 },
-  );
-
-  await queue.upsertJobScheduler(
-    ScheduledJobName.LicenseUsageHeartbeat,
-    { every: 24 * 60 * 60 * 1000 }, // Daily billing liveness observation.
-  );
-
-  // An environment-provided license has no Settings mutation to trigger an
-  // activation request, so establish or renew its Cloud lease at startup.
-  await queue.add(
-    ScheduledJobName.LicenseUsageHeartbeat,
-    { reason: 'scheduler-startup' },
-    { jobId: `license-usage-startup-${Date.now()}` },
   );
 
   await queue.upsertJobScheduler(
@@ -301,6 +285,11 @@ const runJobs = async (
     return;
   }
 
+  // Jobs enqueued by an earlier release for a retired scheduler drain as no-ops.
+  if ((RETIRED_JOB_SCHEDULER_NAMES as readonly string[]).includes(job.name)) {
+    return;
+  }
+
   switch (job.name) {
     case ScheduledJobName.Heartbeat:
       return heartbeatJob();
@@ -314,10 +303,6 @@ const runJobs = async (
       return pullRequestAnalyticsSyncJob(job.data ?? {});
     case ScheduledJobName.InstancePing:
       return instancePingJob();
-    case ScheduledJobName.LicenseUsageSync:
-      return licenseUsageSyncJob();
-    case ScheduledJobName.LicenseUsageHeartbeat:
-      return licenseUsageSyncJob({ heartbeat: true });
     case ScheduledJobName.WebhookCleanup:
       return webhookCleanupJob();
     case ScheduledJobName.StandbyRetention:

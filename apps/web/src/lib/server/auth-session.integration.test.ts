@@ -24,7 +24,6 @@ vi.mock('./access-policy', () => ({
   // Stop after the real session lookup; admission is covered separately.
   evaluateSignInAccess: async () => ({ allowed: false }),
 }));
-vi.mock('./license', () => ({ hasSeatAvailable: async () => true }));
 vi.mock('./invite-context', () => ({
   extractInviteTokenFromRequest: () => null,
   runWithInviteContext: (_token: unknown, callback: () => unknown) =>

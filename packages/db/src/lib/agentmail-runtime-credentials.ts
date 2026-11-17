@@ -4,7 +4,6 @@ import {
   isRoomoteCloudEnabled,
 } from '@roomote/env';
 
-import { getEnvLicenseKey } from './deployment-license';
 import { isAgentMailOutboundEnabled } from './agentmail-outbound-settings';
 import { resolveEffectiveDeploymentEnvVars } from './model-runtime-config';
 
@@ -27,6 +26,15 @@ let cachedCredentials: {
 } | null = null;
 let allocation: Promise<AgentMailRuntimeCredentials | null> | null = null;
 let allocateRetryAfterMs = 0;
+
+/**
+ * Roomote Cloud provisions each hosted deployment with a signed key in
+ * `R_LICENSE_KEY`; it authenticates the deployment to Cloud's managed email
+ * API.
+ */
+function getCloudDeploymentKey(): string | null {
+  return Env.R_LICENSE_KEY?.trim() || null;
+}
 
 function normalizeInboxId(value: string | null | undefined): string | null {
   const normalized = value?.trim().toLowerCase();
@@ -51,20 +59,20 @@ function isComplete(credentials: AgentMailRuntimeCredentials): boolean {
  * Whether Roomote Cloud hands this deployment its email inbox on demand.
  * Cloud turns the channel on for its tenants without allocating an inbox
  * until one is needed; the tenant then asks Cloud for it with its
- * Cloud-issued license.
+ * Cloud-issued deployment key.
  */
 export function isAgentMailCloudManaged(): boolean {
   return (
     isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED) &&
     isEmailChannelEnabled() &&
-    Boolean(getEnvLicenseKey())
+    Boolean(getCloudDeploymentKey())
   );
 }
 
 async function requestCloudManagedCredentials(
   allocate: boolean,
 ): Promise<AgentMailRuntimeCredentials | null> {
-  const licenseKey = getEnvLicenseKey();
+  const licenseKey = getCloudDeploymentKey();
   if (!licenseKey) return null;
   const baseUrl = Env.R_LICENSE_CLOUD_BASE_URL.replace(/\/+$/, '');
   try {

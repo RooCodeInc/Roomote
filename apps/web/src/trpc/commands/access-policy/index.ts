@@ -1,9 +1,7 @@
 import {
   and,
   authAccounts,
-  collectLicensedUserCount,
   db,
-  deploymentSettings,
   eq,
   getDeploymentAccountLinkHelpText,
   inArray,
@@ -11,31 +9,23 @@ import {
   setDeploymentAccountLinkHelpText,
   users,
 } from '@roomote/db/server';
-import { randomUUID } from 'node:crypto';
 import type { UserRole } from '@roomote/types';
-import { captureEvent, syncLicenseWithCloud } from '@roomote/telemetry/server';
+import { captureEvent } from '@roomote/telemetry/server';
 
 import type { UserAuthSuccess } from '@/types';
 import {
   buildInviteUrl,
   createPasswordResetLinkForUser,
   createInvite,
-  FREE_SEAT_LIMIT,
   getDeploymentAccessPolicy,
-  getEffectiveDeploymentSeatLimit,
-  getDeploymentLicenseState,
-  getEnvLicenseKey,
   isInviteUsable,
   listInvites,
   removeUser,
-  resolveLicenseState,
   revokeInvite,
   updateUserRole,
 } from '@/lib/server';
 import { Env } from '@/lib/server/env';
 import { resolveAuthProviderConfig } from '@/lib/server/auth-provider-config';
-
-const DEFAULT_DEPLOYMENT_ID = 'default';
 
 export async function getAccountLinkHelpCommand(
   auth: UserAuthSuccess,
@@ -125,18 +115,6 @@ async function listActiveUsers(): Promise<UserSummary[]> {
   }));
 }
 
-type LicenseSummary = {
-  status: 'unlicensed' | 'invalid' | 'valid' | 'expired';
-  seatLimit: number;
-  seatsUsed: number;
-  freeSeatLimit: number;
-  licenseId: string | null;
-  licensee: string | null;
-  expiresAt: Date | null;
-  /** True when `R_LICENSE_KEY` supplies the active key (UI cannot override). */
-  fromEnv: boolean;
-};
-
 export async function getAccessPolicySettingsCommand(
   auth: UserAuthSuccess,
 ): Promise<{
@@ -145,37 +123,17 @@ export async function getAccessPolicySettingsCommand(
   hasMicrosoftSignIn: boolean;
   invites: InviteSummary[];
   users: UserSummary[];
-  license: LicenseSummary;
 }> {
   assertAdmin(auth);
 
-  const [
-    policy,
-    providerConfig,
-    invites,
-    activeUsers,
-    licenseState,
-    seatLimit,
-  ] = await Promise.all([
+  const [policy, providerConfig, invites, activeUsers] = await Promise.all([
     getDeploymentAccessPolicy(),
     resolveAuthProviderConfig(),
     listInvites(),
     listActiveUsers(),
-    getDeploymentLicenseState(),
-    getEffectiveDeploymentSeatLimit(),
   ]);
 
   return {
-    license: {
-      status: licenseState.status,
-      seatLimit,
-      seatsUsed: activeUsers.length,
-      freeSeatLimit: FREE_SEAT_LIMIT,
-      licenseId: 'licenseId' in licenseState ? licenseState.licenseId : null,
-      licensee: 'licensee' in licenseState ? licenseState.licensee : null,
-      expiresAt: 'expiresAt' in licenseState ? licenseState.expiresAt : null,
-      fromEnv: getEnvLicenseKey() != null,
-    },
     slackTeamId: policy?.slackTeamId ?? null,
     hasSlackSignIn: Boolean(
       providerConfig.slackClientId && providerConfig.slackClientSecret,
@@ -199,73 +157,6 @@ export async function getAccessPolicySettingsCommand(
     })),
     users: activeUsers,
   };
-}
-
-export async function setLicenseKeyCommand(
-  auth: UserAuthSuccess,
-  input: { licenseKey: string | null },
-): Promise<{ saved: true }> {
-  assertAdmin(auth);
-
-  if (getEnvLicenseKey() != null) {
-    throw new Error(
-      'A license key is already set via the R_LICENSE_KEY environment variable. Update or remove that env var and restart the deployment instead of changing the key here.',
-    );
-  }
-
-  const licenseKey = input.licenseKey?.trim() || null;
-
-  if (licenseKey != null) {
-    const state = resolveLicenseState(licenseKey);
-
-    if (state.status === 'invalid') {
-      throw new Error(
-        'That license key is not valid. Check that it was copied completely.',
-      );
-    }
-
-    if (state.status === 'expired') {
-      throw new Error(
-        'That license key has expired. Refresh it in your license account or contact Roomote for help.',
-      );
-    }
-
-    const usage = await collectLicensedUserCount();
-    const activation = await syncLicenseWithCloud({
-      eventId: randomUUID(),
-      observedAt: new Date(),
-      activeUsers: usage.users.total,
-      licenseKey,
-    });
-    if (activation.status === 'license_in_use') {
-      throw new Error(
-        'That license is already active on another deployment. Contact Roomote support to transfer it.',
-      );
-    }
-    if (activation.status === 'rejected') {
-      throw new Error(
-        'The licensing service rejected the activation response. Contact Roomote support if this continues.',
-      );
-    }
-    if (activation.status !== 'synced') {
-      throw new Error(
-        'The licensing service could not activate this license. Check your network connection and try again.',
-      );
-    }
-  }
-
-  if (licenseKey != null) {
-    // syncLicenseWithCloud persists the new key and its Cloud lease in one
-    // guarded update, so a stale scheduled sync cannot restore an old lease.
-    return { saved: true };
-  }
-
-  await db
-    .update(deploymentSettings)
-    .set({ licenseKey: null, licenseCloudState: null, updatedAt: new Date() })
-    .where(eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID));
-
-  return { saved: true };
 }
 
 export async function createInviteCommand(

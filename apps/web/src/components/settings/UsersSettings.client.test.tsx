@@ -31,28 +31,6 @@ type UserSummary = {
   hasCredentialAccount?: boolean;
 };
 
-type LicenseSummary = {
-  status: 'unlicensed' | 'invalid' | 'valid' | 'expired';
-  seatLimit: number;
-  seatsUsed: number;
-  freeSeatLimit: number;
-  licenseId: string | null;
-  licensee: string | null;
-  expiresAt: Date | null;
-  fromEnv: boolean;
-};
-
-const unlicensedLicense: LicenseSummary = {
-  status: 'unlicensed',
-  seatLimit: 10,
-  seatsUsed: 1,
-  freeSeatLimit: 10,
-  licenseId: null,
-  licensee: null,
-  expiresAt: null,
-  fromEnv: false,
-};
-
 function createDeferred<T>() {
   let resolve: (value: T) => void;
   let reject: (reason?: unknown) => void;
@@ -76,11 +54,9 @@ const {
   mockUpdateUserRole,
   mockRemoveUser,
   mockCreatePasswordResetLink,
-  mockSetLicenseKey,
   mockAccountLinkHelpState,
   mockSetAccountLinkHelp,
   mockClipboardWriteText,
-  mockCapture,
 } = vi.hoisted(() => ({
   mockAuthorizedUser: {
     current: { userId: 'user-1', cloudEnabled: false },
@@ -92,16 +68,6 @@ const {
       hasMicrosoftSignIn: false,
       invites: [] as InviteSummary[],
       users: [] as UserSummary[],
-      license: {
-        status: 'unlicensed',
-        seatLimit: 10,
-        seatsUsed: 1,
-        freeSeatLimit: 10,
-        licenseId: null,
-        licensee: null,
-        expiresAt: null,
-        fromEnv: false,
-      } as LicenseSummary,
     },
   },
   mockCreateInvite: vi.fn(
@@ -158,9 +124,6 @@ const {
     url: 'https://roomote.example.com/api/auth/reset-password/token',
     expiresAt: new Date('2026-07-03T13:00:00Z'),
   })),
-  mockSetLicenseKey: vi.fn(async (_input: { licenseKey: string | null }) => ({
-    saved: true,
-  })),
   mockAccountLinkHelpState: {
     current: { helpText: null as string | null },
   },
@@ -169,7 +132,6 @@ const {
     return mockAccountLinkHelpState.current;
   }),
   mockClipboardWriteText: vi.fn(async (_value: string) => undefined),
-  mockCapture: vi.fn(),
 }));
 
 vi.mock('sonner', () => ({
@@ -182,10 +144,6 @@ vi.mock('sonner', () => ({
 vi.mock('@/hooks/useUser', () => ({
   useAuthorizedUser: () => mockAuthorizedUser.current,
   useUser: () => ({ user: { anonymousAnalyticsEnabled: true } }),
-}));
-
-vi.mock('@/hooks/useTelemetry', () => ({
-  useTelemetry: () => ({ capture: mockCapture, enabled: true }),
 }));
 
 vi.mock('@/trpc/client', () => ({
@@ -241,12 +199,6 @@ vi.mock('@/trpc/client', () => ({
           ...options,
         }),
       },
-      setLicenseKey: {
-        mutationOptions: (options: Record<string, unknown> = {}) => ({
-          mutationFn: mockSetLicenseKey,
-          ...options,
-        }),
-      },
     },
   }),
 }));
@@ -285,7 +237,6 @@ describe('UsersSettings', () => {
       hasMicrosoftSignIn: false,
       invites: [],
       users: [],
-      license: unlicensedLicense,
     };
   });
 
@@ -709,168 +660,5 @@ describe('UsersSettings', () => {
       'https://roomote.example.com/api/auth/reset-password/token',
     );
     expect(screen.getByLabelText('Copy password reset link')).toBeEnabled();
-  });
-
-  it('shows seat usage and saves a license key', async () => {
-    mockSettingsState.current = {
-      ...mockSettingsState.current,
-      license: { ...unlicensedLicense, seatsUsed: 4 },
-    };
-
-    renderUsersSettings();
-
-    expect(await screen.findByText('4 of 10 seats used')).toBeInTheDocument();
-    expect(screen.getByText('Free tier')).toBeInTheDocument();
-    expect(screen.queryByText(/Roomote Cloud/)).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole('link', { name: /Refresh the key/ }),
-    ).not.toBeInTheDocument();
-    const purchaseLink = screen.getByRole('link', {
-      name: 'Contact Roomote for a license',
-    });
-    expect(purchaseLink).toHaveAttribute(
-      'href',
-      'mailto:help@roomote.dev?subject=Roomote%20self-hosted%20license',
-    );
-    fireEvent.click(purchaseLink);
-    expect(mockCapture).toHaveBeenCalledWith('license_purchase_cta_clicked', {
-      seatsUsed: 4,
-      seatLimit: 10,
-      licenseStatus: 'unlicensed',
-    });
-    expect(
-      screen.queryByRole('button', { name: 'Remove key' }),
-    ).not.toBeInTheDocument();
-
-    const saveButton = screen.getByRole('button', { name: 'Save key' });
-    expect(saveButton).toBeDisabled();
-
-    fireEvent.change(screen.getByLabelText('License key'), {
-      target: { value: 'RMLK1.payload.signature' },
-    });
-    fireEvent.click(saveButton);
-
-    await waitFor(() => {
-      expect(mockSetLicenseKey.mock.calls[0]?.[0]).toMatchObject({
-        licenseKey: 'RMLK1.payload.signature',
-      });
-    });
-    expect(toast.success).toHaveBeenCalledWith('License key saved.');
-  });
-
-  it('hides the license section for cloud-enabled deployments', async () => {
-    mockAuthorizedUser.current = { userId: 'user-1', cloudEnabled: true };
-
-    renderUsersSettings();
-
-    expect(await screen.findByText('Invites')).toBeInTheDocument();
-    expect(screen.getByText('Users')).toBeInTheDocument();
-    expect(screen.queryByText('License')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('License key')).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole('link', { name: 'Contact Roomote for a license' }),
-    ).not.toBeInTheDocument();
-  });
-
-  it('shows licensed state, at-limit warning, and removes the key', async () => {
-    mockSettingsState.current = {
-      ...mockSettingsState.current,
-      license: {
-        status: 'valid',
-        seatLimit: 25,
-        seatsUsed: 25,
-        freeSeatLimit: 10,
-        licenseId: 'lic_manual',
-        licensee: 'Acme Corp',
-        expiresAt: null,
-        fromEnv: false,
-      },
-    };
-
-    renderUsersSettings();
-
-    expect(await screen.findByText('Licensed')).toBeInTheDocument();
-    expect(screen.getByText('25 of 25 seats used')).toBeInTheDocument();
-    expect(screen.getByText(/Licensed to Acme Corp/)).toBeInTheDocument();
-    expect(screen.getByText(/All seats are in use/)).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Create invite' }),
-    ).toBeDisabled();
-
-    fireEvent.submit(screen.getByLabelText(/Label/).closest('form')!);
-    expect(mockCreateInvite).not.toHaveBeenCalled();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Remove key' }));
-
-    await waitFor(() => {
-      expect(mockSetLicenseKey.mock.calls[0]?.[0]).toMatchObject({
-        licenseKey: null,
-      });
-    });
-    expect(toast.success).toHaveBeenCalledWith('License key removed.');
-  });
-
-  it('hides the license key form when the key is provided by R_LICENSE_KEY', async () => {
-    mockSettingsState.current = {
-      ...mockSettingsState.current,
-      license: {
-        status: 'valid',
-        seatLimit: 50,
-        seatsUsed: 4,
-        freeSeatLimit: 10,
-        licenseId: 'lic_manual',
-        licensee: 'Acme Corp',
-        expiresAt: null,
-        fromEnv: true,
-      },
-    };
-
-    renderUsersSettings();
-
-    expect(await screen.findByText('Licensed')).toBeInTheDocument();
-    expect(
-      screen.getByText((_content, element) => {
-        return (
-          element?.tagName === 'P' &&
-          (element.textContent ?? '').includes(
-            'License key is provided by the R_LICENSE_KEY environment variable',
-          )
-        );
-      }),
-    ).toBeInTheDocument();
-    expect(screen.queryByLabelText('License key')).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole('button', { name: 'Save key' }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole('button', { name: 'Remove key' }),
-    ).not.toBeInTheDocument();
-  });
-
-  it('points purchased licenses to the Cloud portal when expiry is near', async () => {
-    mockSettingsState.current = {
-      ...mockSettingsState.current,
-      license: {
-        status: 'valid',
-        seatLimit: 100,
-        seatsUsed: 20,
-        freeSeatLimit: 10,
-        licenseId: 'lic_sh_123',
-        licensee: 'Engineering',
-        expiresAt: new Date(Date.now() + 20 * 24 * 60 * 60 * 1000),
-        fromEnv: false,
-      },
-    };
-
-    renderUsersSettings();
-
-    expect(
-      await screen.findByText('This license expires soon.', { exact: false }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('link', {
-        name: 'Refresh the key in your license account',
-      }),
-    ).toHaveAttribute('href', 'https://cloud.roomote.dev/');
   });
 });

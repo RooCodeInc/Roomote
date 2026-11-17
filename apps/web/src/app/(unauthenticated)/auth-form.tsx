@@ -74,9 +74,9 @@ export function AuthForm({
   inviteRole?: UserRole | null;
   hideModeSwitchMessage?: boolean;
   /**
-   * Server-determined notice shown above the form (e.g. the deployment is at
-   * its licensed seat limit). Stays visible across sign-in attempts, unlike
-   * the per-attempt error state.
+   * Server-determined notice shown above the form (e.g. an invitation is no
+   * longer valid). Stays visible across sign-in attempts, unlike the
+   * per-attempt error state.
    */
   noticeMessage?: string | null;
   accountLinkHelpText?: string | null;

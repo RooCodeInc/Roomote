@@ -659,7 +659,6 @@ export {
 export {
   requestBrainBackfill,
   requestInstancePing,
-  requestLicenseUsageSync,
   resetInstancePingQueueForTests,
 } from './lib/request-instance-ping';
 export * from './lib/brain-clients';

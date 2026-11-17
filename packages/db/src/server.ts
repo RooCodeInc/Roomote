@@ -115,8 +115,6 @@ export * from './lib/setup-qualification';
 export * from './lib/repositories';
 export * from './lib/telemetry-ids';
 export * from './lib/instance-report';
-export * from './lib/deployment-license';
-export * from './lib/license-usage-observations';
 export * from './lib/pr-review-events';
 export * from './lib/pr-review-notification-units';
 export * from './lib/pull-request-mergeability';
