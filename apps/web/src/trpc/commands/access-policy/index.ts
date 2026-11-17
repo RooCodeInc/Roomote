@@ -27,7 +27,6 @@ import {
 import { Env } from '@/lib/server/env';
 import { resolveAuthProviderConfig } from '@/lib/server/auth-provider-config';
 
-
 export async function getAccountLinkHelpCommand(
   auth: UserAuthSuccess,
 ): Promise<{ helpText: string | null }> {

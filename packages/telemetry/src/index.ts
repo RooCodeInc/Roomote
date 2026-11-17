@@ -222,4 +222,3 @@ export interface PingVersionCheckResponse {
   latestVersion: string | null;
   checkedAt?: string;
 }
-

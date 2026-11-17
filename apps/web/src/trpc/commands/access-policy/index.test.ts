@@ -7,21 +7,19 @@ type TestUser = {
   createdAt: Date;
 };
 
-const {
-  state,
-  getAccountLinkHelpMock,
-  setAccountLinkHelpMock,
-} = vi.hoisted(() => ({
-  state: {
-    users: [] as TestUser[],
-    credentialUserIds: [] as string[],
-    createdResetLinkForUserId: null as string | null,
-  },
-  getAccountLinkHelpMock: vi.fn(async () => null as string | null),
-  setAccountLinkHelpMock: vi.fn(async (value: string | null) =>
-    value?.trim() ? value.trim() : null,
-  ),
-}));
+const { state, getAccountLinkHelpMock, setAccountLinkHelpMock } = vi.hoisted(
+  () => ({
+    state: {
+      users: [] as TestUser[],
+      credentialUserIds: [] as string[],
+      createdResetLinkForUserId: null as string | null,
+    },
+    getAccountLinkHelpMock: vi.fn(async () => null as string | null),
+    setAccountLinkHelpMock: vi.fn(async (value: string | null) =>
+      value?.trim() ? value.trim() : null,
+    ),
+  }),
+);
 
 vi.mock('@roomote/db/server', () => {
   const users = {};

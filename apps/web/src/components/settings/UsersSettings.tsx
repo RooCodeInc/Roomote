@@ -364,9 +364,7 @@ export function UsersSettings() {
             </div>
             <Button
               type="submit"
-              disabled={
-                createInvite.isPending || !maxUsesIsValid
-              }
+              disabled={createInvite.isPending || !maxUsesIsValid}
             >
               {createInvite.isPending ? <Spinner /> : null}
               Create invite
