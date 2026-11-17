@@ -30,15 +30,22 @@ import {
 
 const auth = { userId: 'user-1' } as never;
 
+const emailCapability = vi.hoisted(() => ({ enabled: false }));
+vi.mock('@/lib/server/env', () => ({
+  isEmailChannelEnabled: () => emailCapability.enabled,
+}));
+
 describe('personal account capabilities', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    emailCapability.enabled = false;
   });
 
   it('offers password enrollment to OAuth-only users', async () => {
     userHasCredentialAccountMock.mockResolvedValue(false);
 
     await expect(getPersonalAccountCapabilitiesCommand(auth)).resolves.toEqual({
+      canChangeEmail: false,
       canChangePassword: false,
       canSetPassword: true,
     });
@@ -48,6 +55,7 @@ describe('personal account capabilities', () => {
     userHasCredentialAccountMock.mockResolvedValue(true);
 
     await expect(getPersonalAccountCapabilitiesCommand(auth)).resolves.toEqual({
+      canChangeEmail: false,
       canChangePassword: true,
       canSetPassword: false,
     });
@@ -59,6 +67,15 @@ describe('personal account capabilities', () => {
     expect(setPasswordMock).toHaveBeenCalledWith({
       body: { newPassword: 'new-password' },
       headers: expect.any(Headers),
+    });
+  });
+
+  it('offers email changes only when verification delivery is configured', async () => {
+    emailCapability.enabled = true;
+    await expect(
+      getPersonalAccountCapabilitiesCommand(auth),
+    ).resolves.toMatchObject({
+      canChangeEmail: true,
     });
   });
 });

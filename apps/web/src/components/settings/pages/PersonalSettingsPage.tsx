@@ -17,16 +17,19 @@ import {
 
 export function PersonalSettingsPage({
   profile,
+  canChangeEmail = false,
   canChangePassword,
   canSetPassword,
 }: {
   profile: UserProfileSectionProfile;
+  canChangeEmail?: boolean;
   canChangePassword: boolean;
   canSetPassword: boolean;
 }) {
   return (
     <SettingsShell pageId="personal">
       <UserProfileSection
+        canChangeEmail={canChangeEmail}
         canChangePassword={canChangePassword}
         profile={profile}
       />

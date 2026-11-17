@@ -35,9 +35,11 @@ function getAuthErrorMessage(
 }
 
 export function UserProfileSection({
+  canChangeEmail = false,
   canChangePassword = false,
   profile,
 }: {
+  canChangeEmail?: boolean;
   canChangePassword?: boolean;
   profile: UserProfileSectionProfile;
 }) {
@@ -53,7 +55,7 @@ export function UserProfileSection({
   const trimmedName = name.trim();
   const trimmedEmail = email.trim();
   const hasNameChange = trimmedName !== profile.name;
-  const hasEmailChange = trimmedEmail !== profile.email;
+  const hasEmailChange = canChangeEmail && trimmedEmail !== profile.email;
   // Only show the Remove control for avatars uploaded through this app's
   // /api/avatars/ endpoint. OAuth-provider avatar URLs are not removable here
   // — the user would lose their provider-supplied picture with no way back.
@@ -285,8 +287,8 @@ export function UserProfileSection({
         ) : (
           <form className="space-y-4 max-w-md" onSubmit={handleSubmit}>
             <p className="text-muted-foreground">
-              Update your name or email. Your profile picture can be changed
-              from the profile view.
+              Update your name{canChangeEmail ? ' or email' : ''}. Your profile
+              picture can be changed from the profile view.
             </p>
             <div className="space-y-1">
               <Label htmlFor="personal-name">Name</Label>
@@ -303,13 +305,26 @@ export function UserProfileSection({
               <Label htmlFor="personal-email">Email</Label>
               <Input
                 id="personal-email"
+                readOnly={!canChangeEmail}
+                aria-describedby={
+                  canChangeEmail ? undefined : 'personal-email-unavailable'
+                }
                 type="email"
                 autoComplete="email"
                 required
-                value={email}
+                value={canChangeEmail ? email : profile.email}
                 onChange={(event) => setEmail(event.target.value)}
                 disabled={isSubmitting}
               />
+              {!canChangeEmail && (
+                <p
+                  id="personal-email-unavailable"
+                  className="text-xs text-muted-foreground"
+                >
+                  Email changes require email verification to be enabled for
+                  this deployment.
+                </p>
+              )}
             </div>
             <div className="flex flex-wrap gap-2">
               <Button type="submit" size="sm" disabled={isSubmitting}>
