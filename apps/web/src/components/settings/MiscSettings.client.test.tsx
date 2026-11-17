@@ -2,15 +2,13 @@ import { fireEvent, render, screen } from '@testing-library/react';
 
 const mocks = vi.hoisted(() => ({
   setQueryData: vi.fn(),
-  setAnonymousAnalytics: vi.fn(),
+  setSessionDoneWebhook: vi.fn(),
 }));
 
 vi.mock('@tanstack/react-query', () => ({
   useQuery: () => ({
     data: {
-      anonymousAnalyticsEnabled: true,
       cloudEnabled: true,
-      telemetryEnvAllowed: true,
       diagnostics: { generatedAt: '', sections: [], plainText: '' },
       timeZone: null,
       effectiveTimeZone: 'UTC',
@@ -25,7 +23,7 @@ vi.mock('@tanstack/react-query', () => ({
     isError: false,
   }),
   useMutation: () => ({
-    mutateAsync: mocks.setAnonymousAnalytics,
+    mutateAsync: mocks.setSessionDoneWebhook,
     isPending: false,
   }),
   useQueryClient: () => ({
@@ -37,9 +35,6 @@ vi.mock('@/trpc/client', () => ({
   useTRPC: () => ({
     miscSettings: {
       get: { queryKey: () => ['misc'], queryOptions: () => ({}) },
-      setAnonymousAnalytics: {
-        mutationOptions: () => ({ kind: 'analytics' }),
-      },
       setSessionDoneWebhook: {
         mutationOptions: () => ({ kind: 'webhook' }),
       },

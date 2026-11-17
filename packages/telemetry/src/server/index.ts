@@ -12,13 +12,11 @@
 import { Env, isRoomoteCloudEnabled } from '@roomote/env';
 import {
   db,
-  deploymentSettings,
   eq,
   getInstanceAnalyticsId,
   getUserAnalyticsId,
   taskRuns,
 } from '@roomote/db/server';
-import { isAnonymousAnalyticsEnabledFromMetadata } from '@roomote/feature-flags';
 
 import {
   MAX_TELEMETRY_BATCH_SIZE,
@@ -27,8 +25,6 @@ import {
   type PingEventsRequest,
   type PingInstanceReportRequest,
   type PingPlatformIssueSubmission,
-  type PingVersionCheckRequest,
-  type PingVersionCheckResponse,
   type TelemetryEventProperties,
   type ActivationEnvironmentSource,
   type ActivationAutomationAction,
@@ -152,30 +148,14 @@ function getPingBaseUrl(): string {
 }
 
 /**
- * Whether anonymous analytics is active: the environment gate allows
- * telemetry AND the admin-controlled deployment setting is enabled
- * (opt-out: absent means enabled).
+ * Whether anonymous analytics is active. Only Roomote Cloud deployments send
+ * analytics; self-hosted deployments never do. The environment gate still
+ * applies.
  */
 export async function isAnonymousAnalyticsEnabled(
   cloudEnabled = isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED),
 ): Promise<boolean> {
-  if (!isTelemetryEnvAllowed()) {
-    return false;
-  }
-
-  try {
-    const settings = await db.query.deploymentSettings.findFirst({
-      where: eq(deploymentSettings.id, 'default'),
-      columns: { metadata: true },
-    });
-
-    return isAnonymousAnalyticsEnabledFromMetadata(
-      settings?.metadata,
-      cloudEnabled,
-    );
-  } catch {
-    return false;
-  }
+  return cloudEnabled && isTelemetryEnvAllowed();
 }
 
 async function postToPing(path: string, body: unknown): Promise<Response> {
@@ -463,35 +443,39 @@ export async function captureTaskSettled(
   }
 }
 
+const LATEST_RELEASE_URL =
+  'https://api.github.com/repos/RooCodeInc/Roomote/releases/latest';
+
 /**
- * Asks the Ping service for the latest released version. Mandatory (not
- * gated by the analytics setting) but still env-gated: non-production sends
- * nothing without an explicit force flag and Ping endpoint.
- * Returns null on any failure.
+ * Reads the latest published Roomote release from GitHub for the in-app
+ * "update available" notice. Sends nothing to Roomote. Still env-gated so
+ * development builds stay quiet. Returns null on any failure.
  */
-export async function checkLatestVersion(): Promise<PingVersionCheckResponse | null> {
+export async function checkLatestVersion(): Promise<{
+  latestVersion: string | null;
+} | null> {
   if (!isTelemetryEnvAllowed()) {
     return null;
   }
 
   try {
-    const request: PingVersionCheckRequest = {
-      instanceId: await getInstanceAnalyticsId(),
-      appVersion: getAppVersion(),
-    };
-
-    const response = await postToPing('/v1/version-check', request);
+    const response = await fetch(LATEST_RELEASE_URL, {
+      headers: {
+        Accept: 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+      },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
     if (!response.ok) {
       console.warn(
-        `${LOG_PREFIX} version check failed: ping responded ${response.status}`,
+        `${LOG_PREFIX} version check failed: GitHub responded ${response.status}`,
       );
       return null;
     }
 
-    const payload = (await response.json()) as PingVersionCheckResponse;
-    return typeof payload?.latestVersion === 'string' ||
-      payload?.latestVersion === null
-      ? payload
+    const payload = (await response.json()) as { tag_name?: unknown };
+    return typeof payload?.tag_name === 'string' && payload.tag_name.trim()
+      ? { latestVersion: payload.tag_name.trim() }
       : null;
   } catch (error) {
     console.warn(

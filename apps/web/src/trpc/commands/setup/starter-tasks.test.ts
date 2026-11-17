@@ -101,13 +101,11 @@ describe('completeSetupWithStarterTasksCommand', () => {
     const result = await completeSetupWithStarterTasksCommand(buildAuth(), {
       launchBatchId: '11111111-1111-4111-8111-111111111111',
       selectedStarterTaskIds: ['speed-up-ci', 'security-scan', 'address-todos'],
-      anonymousAnalyticsEnabled: true,
       productUpdatesEnabled: false,
     });
 
     expect(mockAssertAdmin).toHaveBeenCalledOnce();
     expect(mockCompleteSetup).toHaveBeenCalledWith(expect.anything(), {
-      anonymousAnalyticsEnabled: true,
       productUpdatesEnabled: false,
     });
     expect(mockCompleteSetup.mock.invocationCallOrder[0]).toBeLessThan(

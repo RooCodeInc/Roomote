@@ -17,11 +17,6 @@ import {
 import { DeleteObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getRedis, REDIS_KEYS } from '@roomote/redis';
 import {
-  ANONYMOUS_ANALYTICS_METADATA_KEY,
-  isAnonymousAnalyticsEnabledFromMetadata,
-} from '@roomote/feature-flags';
-import { isTelemetryEnvAllowed } from '@roomote/telemetry/server';
-import {
   normalizeTimeZone,
   resolveDeploymentTimeZone,
 } from '@roomote/sdk/server';
@@ -56,15 +51,7 @@ export type DeploymentDiagnostics = {
 };
 
 export type MiscSettings = {
-  /** The admin-controlled opt-out setting (default: enabled). */
-  anonymousAnalyticsEnabled: boolean;
   cloudEnabled: boolean;
-  /**
-   * Whether this environment can send telemetry at all. False in
-   * development or when no release version is baked in; the setting is
-   * still editable so it applies once the deployment runs a real release.
-   */
-  telemetryEnvAllowed: boolean;
   diagnostics: DeploymentDiagnostics;
   timeZone: string | null;
   effectiveTimeZone: string;
@@ -75,22 +62,6 @@ export type MiscSettings = {
     secretConfigured: boolean;
   };
 };
-
-function normalizeMetadata(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return {};
-  }
-  return { ...(value as Record<string, unknown>) };
-}
-
-async function readDeploymentMetadata(): Promise<Record<string, unknown>> {
-  const settings = await db.query.deploymentSettings.findFirst({
-    where: eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID),
-    columns: { metadata: true },
-  });
-
-  return normalizeMetadata(settings?.metadata);
-}
 
 function formatStatus(value: DiagnosticsStatus): string {
   switch (value) {
@@ -569,29 +540,22 @@ export async function getMiscSettingsCommand(
 ): Promise<MiscSettings> {
   assertAdmin(auth);
 
-  const [metadata, diagnostics, configured, resolvedTimeZone] =
-    await Promise.all([
-      readDeploymentMetadata(),
-      collectDeploymentDiagnostics(),
-      db.query.deploymentSettings.findFirst({
-        where: eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID),
-        columns: {
-          timeZone: true,
-          sessionDoneWebhookEnabled: true,
-          sessionDoneWebhookUrl: true,
-          sessionDoneWebhookSecret: true,
-        },
-      }),
-      resolveDeploymentTimeZone(),
-    ]);
+  const [diagnostics, configured, resolvedTimeZone] = await Promise.all([
+    collectDeploymentDiagnostics(),
+    db.query.deploymentSettings.findFirst({
+      where: eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID),
+      columns: {
+        timeZone: true,
+        sessionDoneWebhookEnabled: true,
+        sessionDoneWebhookUrl: true,
+        sessionDoneWebhookSecret: true,
+      },
+    }),
+    resolveDeploymentTimeZone(),
+  ]);
 
   return {
-    anonymousAnalyticsEnabled: isAnonymousAnalyticsEnabledFromMetadata(
-      metadata,
-      isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED),
-    ),
     cloudEnabled: isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED),
-    telemetryEnvAllowed: isTelemetryEnvAllowed(),
     diagnostics,
     timeZone: configured?.timeZone ?? null,
     effectiveTimeZone: resolvedTimeZone.timeZone,
@@ -674,37 +638,4 @@ export async function setDeploymentTimeZoneCommand(
   }
 
   return { timeZone, effectiveTimeZone: timeZone };
-}
-
-export async function setAnonymousAnalyticsCommand(
-  auth: UserAuthSuccess,
-  input: { enabled: boolean },
-): Promise<MiscSettings> {
-  assertAdmin(auth);
-
-  const existingSettings = await db.query.deploymentSettings.findFirst({
-    where: eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID),
-    columns: { metadata: true },
-  });
-
-  const cloudEnabled = isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED);
-  const nextMetadata: Record<string, unknown> = {
-    ...normalizeMetadata(existingSettings?.metadata),
-    [ANONYMOUS_ANALYTICS_METADATA_KEY]: cloudEnabled ? true : input.enabled,
-  };
-
-  if (!existingSettings) {
-    await db.insert(deploymentSettings).values({
-      id: DEFAULT_DEPLOYMENT_ID,
-      metadata: nextMetadata,
-      setupCompletedAt: null,
-    });
-  } else {
-    await db
-      .update(deploymentSettings)
-      .set({ metadata: nextMetadata, updatedAt: new Date() })
-      .where(eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID));
-  }
-
-  return getMiscSettingsCommand(auth);
 }

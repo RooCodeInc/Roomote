@@ -212,13 +212,3 @@ export interface PingPlatformIssueSubmission {
     taskUrl: string;
   };
 }
-
-export interface PingVersionCheckRequest {
-  instanceId: string;
-  appVersion: string;
-}
-
-export interface PingVersionCheckResponse {
-  latestVersion: string | null;
-  checkedAt?: string;
-}

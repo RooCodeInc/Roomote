@@ -108,18 +108,3 @@ export function selectDeploymentExperimentValuesForAudiences(
 
   return selected;
 }
-
-export const ANONYMOUS_ANALYTICS_METADATA_KEY =
-  'anonymous_analytics_enabled' as const;
-
-export function isAnonymousAnalyticsEnabledFromMetadata(
-  metadata: unknown,
-  cloudEnabled = false,
-): boolean {
-  if (cloudEnabled) return true;
-
-  const normalizedMetadata = normalizeMetadataRecord(metadata);
-  if (!(ANONYMOUS_ANALYTICS_METADATA_KEY in normalizedMetadata)) return true;
-
-  return coerceToBoolean(normalizedMetadata[ANONYMOUS_ANALYTICS_METADATA_KEY]);
-}

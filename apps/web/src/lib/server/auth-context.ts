@@ -10,10 +10,7 @@ import {
   users,
 } from '@roomote/db/server';
 import type { UserRole } from '@roomote/types';
-import {
-  isAnonymousAnalyticsEnabledFromMetadata,
-  normalizeMetadataRecord,
-} from '@roomote/feature-flags';
+import { normalizeMetadataRecord } from '@roomote/feature-flags';
 import { getManagedDeploymentAccessFromMetadata } from '@roomote/types';
 import { requestInstancePing } from '@roomote/sdk/server/request-instance-ping';
 import { isTelemetryEnvAllowed } from '@roomote/telemetry/server';
@@ -410,12 +407,9 @@ export async function authorize(
     return authContext;
   }
 
+  // Only Roomote Cloud deployments send anonymous analytics.
   const anonymousAnalyticsEnabled =
-    isTelemetryEnvAllowed() &&
-    isAnonymousAnalyticsEnabledFromMetadata(
-      authContext.deploymentMetadata,
-      isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED),
-    );
+    isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED) && isTelemetryEnvAllowed();
 
   return {
     success: true,
