@@ -2,6 +2,19 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.23.0 (2026-11-17)
+
+Roomote 1.23.0 stops self-hosted deployments from sending analytics to the Roomote team.
+
+### Highlights
+
+- Self-hosted deployments no longer send anonymous analytics or usage telemetry, and the Anonymous analytics setting is gone.
+- The daily update check now reads the latest release from GitHub instead of contacting Roomote.
+
+### Minor changes
+
+- Self-hosted deployments no longer send anonymous analytics or usage telemetry, and the Anonymous analytics setting is gone. The daily update check now reads the latest release from GitHub instead of contacting Roomote.
+
 ## 1.22.0 (2026-11-17)
 
 Roomote 1.22.0 makes Roomote open source under the Apache License 2.0 and removes the self-hosted user limit.
