@@ -133,6 +133,7 @@ export function ConnectedMcpClients({
                 variant="outline"
                 size="sm"
                 className="self-start"
+                aria-label={`Revoke ${grant.clientName}`}
                 onClick={() =>
                   setPending({ grantId: grant.grantId, name: grant.clientName })
                 }
