@@ -29,14 +29,20 @@ export function CreateEnvVar({ onCreated }: CreateEnvVarProps) {
 
   const createEnvVar = useCreateEnvVar();
 
-  const onSubmit = (data: CreateEnvVar) =>
+  const onSubmit = (data: CreateEnvVar) => {
+    if (createEnvVar.isPending) return;
+
     createEnvVar.mutate(data, {
       onSuccess: () => {
-        form.reset();
-        onCreated();
+        const current = form.getValues();
+        if (current.name === data.name && current.value === data.value) {
+          form.reset();
+          onCreated();
+        }
       },
       onError: (error) => form.setError('root', { message: error.message }),
     });
+  };
 
   const handleFormSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
