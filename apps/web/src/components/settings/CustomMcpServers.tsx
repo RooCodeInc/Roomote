@@ -180,11 +180,13 @@ function KeyValueRows({
   onChange,
   namePlaceholder,
   isEdit,
+  disabled,
 }: {
   entries: { name: string; value: string }[];
   onChange: (entries: { name: string; value: string }[]) => void;
   namePlaceholder: string;
   isEdit: boolean;
+  disabled: boolean;
 }) {
   return (
     <div className="space-y-2">
@@ -194,6 +196,7 @@ function KeyValueRows({
             <Input
               className="font-mono"
               placeholder={namePlaceholder}
+              disabled={disabled}
               value={entry.name}
               onChange={(event) =>
                 onChange(
@@ -210,6 +213,7 @@ function KeyValueRows({
           <div className="flex-1">
             <Input
               secret
+              disabled={disabled}
               className="ph-no-capture ph-mask font-mono sentry-mask"
               placeholder={
                 isEdit ? 'Leave blank to keep the existing value' : 'Value'
@@ -229,6 +233,7 @@ function KeyValueRows({
           </div>
           <Button
             type="button"
+            disabled={disabled}
             variant="ghost"
             size="sm"
             onClick={() =>
@@ -243,6 +248,7 @@ function KeyValueRows({
       ))}
       <Button
         type="button"
+        disabled={disabled}
         variant="secondary"
         size="sm"
         onClick={() => onChange([...entries, { name: '', value: '' }])}
@@ -320,7 +326,10 @@ function ServerFormDialog({
   );
 
   const isSaving =
-    createServer.isPending || updateServer.isPending || setVisibility.isPending;
+    form.formState.isSubmitting ||
+    createServer.isPending ||
+    updateServer.isPending ||
+    setVisibility.isPending;
 
   const onSubmit = form.handleSubmit(async (values) => {
     setError(null);
@@ -365,8 +374,14 @@ function ServerFormDialog({
   });
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!isSaving) onOpenChange(nextOpen);
+      }}
+    >
       <DialogContent
+        showCloseButton={!isSaving}
         size="xl"
         className="ph-no-capture ph-mask ph-no-recording sentry-block"
       >
@@ -414,6 +429,7 @@ function ServerFormDialog({
                       size="sm"
                       variant="ghost"
                       onClick={() => onEditServer(server)}
+                      disabled={isSaving}
                     >
                       <Pencil />
                       Edit
@@ -422,7 +438,7 @@ function ServerFormDialog({
                       type="button"
                       size="sm"
                       variant="outline"
-                      disabled={enablingServerId != null}
+                      disabled={isSaving || enablingServerId != null}
                       onClick={() => onEnableServer(server)}
                     >
                       {enablingServerId === server.id
@@ -446,6 +462,7 @@ function ServerFormDialog({
                   </Label>
                   <textarea
                     id="custom-mcp-json-import"
+                    disabled={isSaving}
                     className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm font-mono min-h-28"
                     placeholder='{"mcpServers": {"example": {"command": "npx", "args": ["-y", "@example/mcp-server"]}}}'
                     value={jsonText}
@@ -457,6 +474,7 @@ function ServerFormDialog({
                   <div className="flex gap-2">
                     <Button
                       type="button"
+                      disabled={isSaving}
                       size="sm"
                       onClick={() => {
                         try {
@@ -486,6 +504,7 @@ function ServerFormDialog({
                     </Button>
                     <Button
                       type="button"
+                      disabled={isSaving}
                       variant="secondary"
                       size="sm"
                       onClick={() => {
@@ -500,6 +519,7 @@ function ServerFormDialog({
               ) : (
                 <Button
                   type="button"
+                  disabled={isSaving}
                   variant="secondary"
                   size="sm"
                   onClick={() => setJsonImportOpen(true)}
@@ -520,7 +540,7 @@ function ServerFormDialog({
             <Input
               className="font-mono"
               placeholder="e.g. internal-tools"
-              disabled={isEdit}
+              disabled={isEdit || isSaving}
               {...register('name')}
               data-1p-ignore
             />
@@ -535,6 +555,7 @@ function ServerFormDialog({
               <Label>Type</Label>
               <RadioGroup
                 value={transport}
+                disabled={isSaving}
                 onValueChange={(value) =>
                   setValue('transport', value as Transport)
                 }
@@ -557,6 +578,7 @@ function ServerFormDialog({
               <Label id="mcp-visibility-label">Who can use this server?</Label>
               <RadioGroup
                 aria-labelledby="mcp-visibility-label"
+                disabled={isSaving}
                 value={visibility}
                 onValueChange={(value) =>
                   setValue('visibility', value as CustomMcpServerVisibility)
@@ -592,6 +614,7 @@ function ServerFormDialog({
                   className="font-mono"
                   placeholder="https://mcp.example.com/mcp"
                   {...register('url')}
+                  disabled={isSaving}
                 />
               </div>
 
@@ -599,6 +622,7 @@ function ServerFormDialog({
                 <Label>Authentication</Label>
                 <RadioGroup
                   value={authType}
+                  disabled={isSaving}
                   onValueChange={(value) =>
                     setValue('authType', value as AuthType)
                   }
@@ -624,6 +648,7 @@ function ServerFormDialog({
                   <Label>Headers</Label>
                   <KeyValueRows
                     entries={headers}
+                    disabled={isSaving}
                     onChange={(entries) => setValue('headers', entries)}
                     namePlaceholder="e.g. x-api-key"
                     isEdit={isEdit}
@@ -656,6 +681,7 @@ function ServerFormDialog({
                     <Input
                       className="font-mono"
                       {...register('manualClientId')}
+                      disabled={isSaving}
                       data-1p-ignore
                     />
                   </div>
@@ -668,12 +694,14 @@ function ServerFormDialog({
                         isEdit ? 'Leave blank to keep the existing value' : ''
                       }
                       {...register('manualClientSecret')}
+                      disabled={isSaving}
                       data-1p-ignore
                     />
                   </div>
                   <div className="flex items-center gap-2">
                     <Switch
                       checked={watch('oauthResourceIndicatorDisabled')}
+                      disabled={isSaving}
                       onCheckedChange={(checked) =>
                         setValue('oauthResourceIndicatorDisabled', checked)
                       }
@@ -695,6 +723,7 @@ function ServerFormDialog({
                   className="font-mono"
                   placeholder="e.g. npx"
                   {...register('stdioCommand')}
+                  disabled={isSaving}
                 />
               </div>
               <div className="space-y-2">
@@ -703,12 +732,14 @@ function ServerFormDialog({
                   className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm font-mono min-h-20"
                   placeholder={'-y\n@example/mcp-server'}
                   {...register('stdioArgs')}
+                  disabled={isSaving}
                 />
               </div>
               <div className="space-y-2">
                 <Label>Environment variables</Label>
                 <KeyValueRows
                   entries={stdioEnv}
+                  disabled={isSaving}
                   onChange={(entries) => setValue('stdioEnv', entries)}
                   namePlaceholder="e.g. EXAMPLE_TOKEN"
                   isEdit={isEdit}
@@ -730,6 +761,7 @@ function ServerFormDialog({
               type="button"
               variant="secondary"
               onClick={() => onOpenChange(false)}
+              disabled={isSaving}
             >
               Cancel
             </Button>
