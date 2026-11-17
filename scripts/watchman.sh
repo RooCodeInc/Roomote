@@ -24,11 +24,24 @@ fi
 APP_REL="${APP_DIR#$REPO_ROOT/}"
 
 if command -v watchman &>/dev/null && watchman version &>/dev/null; then
+  RUN_PID=''
   cleanup() {
     watchman -- trigger-del "$REPO_ROOT" "${SERVICE_NAME}-build" >/dev/null 2>&1 || true
   }
 
-  trap cleanup EXIT INT TERM
+  stop_runtime() {
+    trap '' INT TERM
+    if [[ -n "$RUN_PID" ]]; then
+      # Async shell commands can inherit ignored SIGINT; TERM also stops them.
+      kill -TERM "$RUN_PID" 2>/dev/null || true
+      wait "$RUN_PID" 2>/dev/null || true
+    fi
+    exit "$1"
+  }
+
+  trap cleanup EXIT
+  trap 'stop_runtime 130' INT
+  trap 'stop_runtime 143' TERM
 
   echo "[$SERVICE_NAME:watchman] Initial build..."
   bash -lc "$BUILD_CMD"
@@ -62,7 +75,12 @@ if command -v watchman &>/dev/null && watchman version &>/dev/null; then
 WATCHMAN_CMD
 
   echo "[$SERVICE_NAME:watchman] Starting runtime..."
-  exec bash -lc "$RUN_CMD"
+  # Keep the trigger owner alive so runtime exit also releases the trigger.
+  bash -lc "$RUN_CMD" &
+  RUN_PID=$!
+  STATUS=0
+  wait "$RUN_PID" || STATUS=$?
+  exit "$STATUS"
 fi
 
 if command -v inotifywait &>/dev/null; then
