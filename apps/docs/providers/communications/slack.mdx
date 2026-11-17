@@ -284,6 +284,20 @@ chart keeps a Markdown fallback for notifications and accessibility, and the
 same structured data renders as a chart with an accessible table in the Roomote
 web transcript. No additional Slack scope is required.
 
+## Partial channel history
+
+In busy channels or when Slack is slow or rate-limited, Roomote can return the
+messages already read and mark the result as partial. A partial result is not a
+complete record of the requested time range: older channel messages, thread
+replies, or recent replies to threads started before that range may be missing.
+
+Roomote receives continuation information for unread channel history and results
+that exceed the response-size limit. These continuations are independent; the
+agent needs to follow each one and deduplicate overlapping messages. The result
+also explains when thread replies could not be read. If a summary is incomplete,
+ask Roomote to use a narrower time range or provide links to the specific threads
+you need it to inspect.
+
 ## Local URL changes
 
 Keep the public URL stable. When it changes, update the Slack app's redirect
