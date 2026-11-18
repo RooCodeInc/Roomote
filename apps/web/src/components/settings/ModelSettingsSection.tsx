@@ -1039,6 +1039,7 @@ export function ModelSettingsSection({
     Partial<Record<TaskModelRole, boolean>>
   >({});
   const [newModelId, setNewModelId] = useState('');
+  const [suggestionsDismissed, setSuggestionsDismissed] = useState(false);
   const [newModelProvider, setNewModelProvider] =
     useState<SetupModelProviderId>('openrouter');
   const [deleteConfirmModelId, setDeleteConfirmModelId] = useState<
@@ -1096,7 +1097,9 @@ export function ModelSettingsSection({
   const normalizedNewModelId = newModelId.trim();
   const debouncedSuggestionQuery = useDebouncedValue(normalizedNewModelId, 150);
   const shouldShowSuggestions =
-    suggestionState.suggestions.length > 0 && normalizedNewModelId.length >= 1;
+    !suggestionsDismissed &&
+    suggestionState.suggestions.length > 0 &&
+    normalizedNewModelId.length >= 1;
   const suggestionsQuery = useQuery(
     trpc.taskModels.suggest.queryOptions(
       {
@@ -1638,6 +1641,7 @@ export function ModelSettingsSection({
 
   const selectSuggestion = (suggestion: TaskModelSuggestion) => {
     selectedSuggestionSlugRef.current = suggestion.slug;
+    setSuggestionsDismissed(true);
     setNewModelId(suggestion.slug);
     setSuggestionState(EMPTY_SUGGESTION_STATE);
     window.requestAnimationFrame(() => {
@@ -2807,13 +2811,14 @@ export function ModelSettingsSection({
                 <p>
                   To add a model, choose its provider and enter the model slug
                 </p>
-                <div className="flex flex-row items-center gap-2">
+                <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center">
                   <Select
                     value={activeNewModelProvider.id}
                     handoffTargetOnSelect={inputRef}
-                    onValueChange={(value) =>
-                      setNewModelProvider(value as SetupModelProviderId)
-                    }
+                    onValueChange={(value) => {
+                      setNewModelProvider(value as SetupModelProviderId);
+                      setSuggestionsDismissed(false);
+                    }}
                   >
                     <SelectTrigger
                       className="w-44 shrink-0"
@@ -2836,10 +2841,18 @@ export function ModelSettingsSection({
                           <Input
                             ref={inputRef}
                             value={newModelId}
-                            onChange={(event) =>
-                              setNewModelId(event.target.value)
-                            }
+                            onChange={(event) => {
+                              setNewModelId(event.target.value);
+                              setSuggestionsDismissed(false);
+                            }}
                             onKeyDown={(event) => {
+                              if (suggestionsDismissed) {
+                                if (event.key === 'ArrowDown') {
+                                  event.preventDefault();
+                                  setSuggestionsDismissed(false);
+                                }
+                                return;
+                              }
                               if (suggestionState.suggestions.length === 0) {
                                 return;
                               }
@@ -2897,6 +2910,18 @@ export function ModelSettingsSection({
                         align="start"
                         className="w-(--radix-popover-trigger-width) p-0"
                         onOpenAutoFocus={(event) => event.preventDefault()}
+                        onCloseAutoFocus={(event) => event.preventDefault()}
+                        onEscapeKeyDown={() => setSuggestionsDismissed(true)}
+                        onInteractOutside={(event) => {
+                          if (
+                            event.target instanceof Node &&
+                            inputRef.current?.contains(event.target)
+                          ) {
+                            event.preventDefault();
+                            return;
+                          }
+                          setSuggestionsDismissed(true);
+                        }}
                       >
                         <Command>
                           <CommandList>
