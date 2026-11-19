@@ -42,6 +42,7 @@ vi.mock('@roomote/db/server', () => ({
     ownerUserId: 'personal.ownerUserId',
   },
   upsertIntegrationToolPolicy: vi.fn(),
+  upsertIntegrationToolPolicies: vi.fn(),
   upsertIntegrationToolUserPolicy: vi.fn(),
 }));
 
@@ -129,6 +130,42 @@ describe('personal integration tool policy commands', () => {
       updatedAt: expect.any(Date),
     });
   });
+
+  it.each(['allow', 'always_allow', 'ask'] as const)(
+    'clears both disabled Jira names when switching to %s',
+    async (mode) => {
+      mockGetMcpIntegration.mockReturnValue({ id: 'jira' });
+      mockDeploymentFindFirst.mockResolvedValue({
+        mcpId: 'jira',
+        disabledTools: [
+          'getVisibleJiraProjects',
+          'listJiraProjects',
+          'getJiraIssue',
+        ],
+      });
+      const {
+        setIntegrationToolPolicyCommand,
+        setIntegrationToolPoliciesCommand,
+      } = await import('../index');
+      if (mode === 'ask') {
+        await setIntegrationToolPoliciesCommand(auth, {
+          integrationId: 'jira',
+          toolNames: ['listJiraProjects'],
+          mode,
+        });
+      } else {
+        await setIntegrationToolPolicyCommand(auth, {
+          integrationId: 'jira',
+          toolName: 'listJiraProjects',
+          mode,
+        });
+      }
+      expect(mockSet).toHaveBeenCalledWith({
+        disabledTools: ['getJiraIssue'],
+        updatedAt: expect.any(Date),
+      });
+    },
+  );
 
   it('needs no experiment: personal policies are always available', async () => {
     await listPersonalIntegrationToolPoliciesCommand(auth);
