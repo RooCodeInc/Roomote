@@ -101,6 +101,32 @@ const JIRA_SHARED_TOOL_NAMES = [
   'getAccessibleAtlassianResources',
 ] as const;
 
+const JIRA_TOOL_RENAME_GROUPS = [
+  ['getVisibleJiraProjects', 'listJiraProjects'],
+  ['getJiraProjectIssueTypesMetadata', 'listJiraProjectIssueTypesMetadata'],
+  ['getIssueLinkTypes', 'listJiraIssueLinkTypes'],
+  ['getTransitionsForJiraIssue', 'listJiraIssueTransitions'],
+  ['getJiraIssueRemoteIssueLinks', 'listJiraIssueRemoteIssueLinks'],
+] as const;
+
+/** Preserve disabled operations across provider tool renames without rewriting saved settings. */
+export function getIntegrationMcpDisabledToolNames(
+  integrationOrId: McpIntegration | string,
+  disabledToolNames: readonly string[] | null | undefined,
+): string[] {
+  const disabled = new Set(disabledToolNames ?? []);
+  const id =
+    typeof integrationOrId === 'string' ? integrationOrId : integrationOrId.id;
+  if (id === 'jira') {
+    for (const group of JIRA_TOOL_RENAME_GROUPS) {
+      if (group.some((name) => disabled.has(name))) {
+        for (const name of group) disabled.add(name);
+      }
+    }
+  }
+  return [...disabled];
+}
+
 const JIRA_READ_ONLY_TOOL_NAMES = [
   ...JIRA_SHARED_TOOL_NAMES,
   'getJiraIssue',
@@ -110,6 +136,13 @@ const JIRA_READ_ONLY_TOOL_NAMES = [
   'getIssueLinkTypes',
   'getTransitionsForJiraIssue',
   'getVisibleJiraProjects',
+  // v2 names for the existing project, issue-type, link, and transition reads.
+  // Keep v1 aliases for stored tool policies and in-flight clients.
+  'listJiraProjects',
+  'listJiraProjectIssueTypesMetadata',
+  'listJiraIssueLinkTypes',
+  'listJiraIssueTransitions',
+  'listJiraIssueRemoteIssueLinks',
   'lookupJiraAccountId',
   'searchJiraIssuesUsingJql',
 ] as const;

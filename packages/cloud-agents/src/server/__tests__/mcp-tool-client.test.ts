@@ -4,6 +4,7 @@ import {
   ErrorCode,
   McpError,
   type CallToolResult,
+  type ListToolsRequest,
 } from '@modelcontextprotocol/sdk/types.js';
 import { formatErrorForLog } from '@roomote/types';
 import {
@@ -102,6 +103,59 @@ describe('extractMcpToolResultPayload', () => {
 
 describe('callMcpTool with the real AI SDK and local MCP server', () => {
   afterEach(() => vi.restoreAllMocks());
+
+  it.each(['list', 'call'])(
+    'follows paginated flat tools for %s',
+    async (operation) => {
+      const listTools = vi.fn((request: ListToolsRequest) =>
+        request.params?.cursor === 'jira-page-2'
+          ? {
+              tools: [
+                {
+                  name: 'getJiraIssue',
+                  inputSchema: { type: 'object' as const },
+                },
+              ],
+            }
+          : { tools: [], nextCursor: 'jira-page-2' },
+      );
+      const call = vi.fn(() => ({
+        content: [{ type: 'text' as const, text: '{"key":"TEST-1"}' }],
+      }));
+      const endpoint = await startMcpToolTestServer(call, { listTools });
+      try {
+        if (operation === 'list') {
+          await expect(listMcpTools({ url: endpoint.url })).resolves.toEqual([
+            { name: 'getJiraIssue', inputSchema: { type: 'object' } },
+          ]);
+        } else {
+          await expect(
+            callMcpTool({ url: endpoint.url, toolName: 'getJiraIssue' }),
+          ).resolves.toEqual({ key: 'TEST-1' });
+          expect(call).toHaveBeenCalledOnce();
+        }
+        expect(listTools).toHaveBeenCalledTimes(2);
+        expect(listTools.mock.calls[1]?.[0].params?.cursor).toBe('jira-page-2');
+      } finally {
+        await endpoint.close();
+      }
+    },
+  );
+
+  it('rejects repeated catalog cursors and closes the transport', async () => {
+    const endpoint = await startMcpToolTestServer(() => ({ content: [] }), {
+      listTools: () => ({ tools: [], nextCursor: 'repeated' }),
+    });
+    const close = vi.spyOn(StreamableHTTPClientTransport.prototype, 'close');
+    try {
+      await expect(listMcpTools({ url: endpoint.url })).rejects.toThrow(
+        'pagination did not terminate',
+      );
+      expect(close).toHaveBeenCalledOnce();
+    } finally {
+      await endpoint.close();
+    }
+  });
 
   it.each<{ name: string; result: CallToolResult; expected: unknown }>([
     {

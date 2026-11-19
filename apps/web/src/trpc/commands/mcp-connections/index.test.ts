@@ -64,7 +64,15 @@ const memberAuth = {
   isAdmin: false,
 } as UserAuthSuccess;
 
-const testMcpIds = ['asana', 'exa', 'linear', 'monday', 'sentry', 'voice'];
+const testMcpIds = [
+  'asana',
+  'exa',
+  'jira',
+  'linear',
+  'monday',
+  'sentry',
+  'voice',
+];
 
 async function cleanup() {
   await db
@@ -90,6 +98,79 @@ describe('MCP connection lifecycle telemetry', () => {
   });
 
   afterAll(cleanup);
+
+  it('clears a legacy Jira client registration when reconnecting for v2 consent', async () => {
+    await connectMcpCommand(adminAuth, { mcpId: 'jira' });
+    await db
+      .update(mcpConnections)
+      .set({
+        authConfig: {
+          type: 'oauth_client',
+          client_id: 'legacy-v1-client',
+          registered_redirect_uri: 'https://example.com/api/mcp-oauth/callback',
+        },
+        enabled: true,
+        authStatus: 'authenticated',
+      })
+      .where(eq(mcpConnections.mcpId, 'jira'));
+    await connectMcpCommand(adminAuth, { mcpId: 'jira' });
+    const connections = await db
+      .select()
+      .from(mcpConnections)
+      .where(eq(mcpConnections.mcpId, 'jira'));
+    expect(connections).toHaveLength(1);
+    expect(connections[0]).toMatchObject({
+      authConfig: {},
+      enabled: false,
+      authStatus: 'pending',
+    });
+  });
+
+  it('loads all catalog pages even when the first page has no tools', async () => {
+    await setDeploymentMcpEnabledCommand(adminAuth, {
+      mcpId: 'exa',
+      enabled: true,
+    });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json(
+          { result: { tools: [], nextCursor: 'page-2' } },
+          { headers: { 'mcp-session-id': 'catalog-session' } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        Response.json({ result: { tools: [{ name: 'web_search_exa' }] } }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(
+      listDeploymentMcpIntegrationToolsCommand(adminAuth, { mcpId: 'exa' }),
+    ).resolves.toMatchObject({ tools: [{ name: 'web_search_exa' }] });
+    expect(JSON.parse(fetchMock.mock.calls[1]?.[1]?.body).params).toEqual({
+      cursor: 'page-2',
+    });
+    expect(fetchMock.mock.calls[1]?.[1]?.headers['mcp-session-id']).toBe(
+      'catalog-session',
+    );
+  });
+
+  it('rejects a repeated cursor rather than silently returning a partial catalog', async () => {
+    await setDeploymentMcpEnabledCommand(adminAuth, {
+      mcpId: 'exa',
+      enabled: true,
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockImplementation(async () =>
+          Response.json({ result: { tools: [], nextCursor: 'repeated' } }),
+        ),
+    );
+    await expect(
+      listDeploymentMcpIntegrationToolsCommand(adminAuth, { mcpId: 'exa' }),
+    ).rejects.toThrow('invalid tool catalog pagination');
+  });
 
   it('validates and encrypts a deployment-wide Exa API key before connecting', async () => {
     const fetchMock = vi.fn().mockResolvedValue(

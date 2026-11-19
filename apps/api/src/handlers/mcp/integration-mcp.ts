@@ -12,6 +12,7 @@ import {
   getMcpIntegrationUpstreamUrl,
   getMcpIntegrationConnectionScope,
   getAllowedIntegrationMcpToolNames,
+  getIntegrationMcpDisabledToolNames,
   isMcpConnectionExaConfig,
   isMcpConnectionXConfig,
   type McpIntegration,
@@ -107,7 +108,10 @@ async function resolveDeploymentToolPolicy(mcpId: string) {
 
   return {
     enabled: Boolean(enablement),
-    disabledToolNames: enablement?.disabledTools ?? null,
+    disabledToolNames: getIntegrationMcpDisabledToolNames(
+      mcpId,
+      enablement?.disabledTools,
+    ),
     allowedToolNames: getAllowedIntegrationMcpToolNames(mcpId) ?? null,
   };
 }

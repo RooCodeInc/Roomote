@@ -435,6 +435,36 @@ describe('GET /api/mcp-oauth/callback', () => {
     );
   });
 
+  it('exchanges Jira codes at the v2 issuer with the canonical resource', async () => {
+    const types =
+      await vi.importActual<typeof import('@roomote/types')>('@roomote/types');
+    const integration = types.getMcpIntegration('jira')!;
+    mcpConnectionsFindFirstMock.mockResolvedValue({
+      id: CONNECTION_ID,
+      mcpId: 'jira',
+      userId: null,
+      connectionRole: 'default',
+    });
+    getMcpIntegrationMock.mockReturnValue(integration);
+    isDeploymentScopedMcpIntegrationMock.mockReturnValue(true);
+    getMcpIntegrationOauthEndpointsMock.mockReturnValue(
+      integration.oauthEndpoints,
+    );
+    getMcpIntegrationOauthResourceMock.mockReturnValue(
+      integration.oauthResource,
+    );
+    await GET(buildRequest('?code=auth-code&state=state-1'));
+    expect(exchangeCodeForTokensMock).toHaveBeenCalledWith(
+      'https://auth.atlassian.com/oauth/token',
+      'auth-code',
+      'verifier-1',
+      { client_id: 'client-1' },
+      PUBLIC_CALLBACK,
+      { resource: 'https://mcp.atlassian.com/v2/mcp' },
+    );
+    expect(discoverOAuthEndpointsMock).not.toHaveBeenCalled();
+  });
+
   it('rejects a pending callback when integrations become disabled', async () => {
     bootstrapWebRuntimeEnvMock.mockResolvedValue({
       R_APP_URL: 'http://localhost:13000',
