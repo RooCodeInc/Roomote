@@ -4,6 +4,7 @@ import {
   eq,
   inArray,
   mcpConnections,
+  integrationToolPolicies,
   userFactory,
 } from '@roomote/db/server';
 import {
@@ -51,6 +52,10 @@ import {
   saveVoiceConnectionCommand,
   setDeploymentMcpEnabledCommand,
 } from './index';
+import {
+  setIntegrationToolPolicyCommand,
+  setIntegrationToolPoliciesCommand,
+} from '../integration-tool-policies';
 
 const adminAuth = {
   success: true,
@@ -125,6 +130,59 @@ describe('MCP connection lifecycle telemetry', () => {
       authStatus: 'pending',
     });
   });
+
+  it.each(['allow', 'always_allow', 'ask'] as const)(
+    're-enables a legacy-disabled Jira operation through the %s policy',
+    async (mode) => {
+      await db.insert(deploymentMcpEnablements).values({
+        mcpId: 'jira',
+        enabled: true,
+        disabledTools: [
+          'getVisibleJiraProjects',
+          'listJiraProjects',
+          'getJiraIssue',
+        ],
+      });
+      await db.insert(integrationToolPolicies).values({
+        integrationId: 'jira',
+        toolName: 'getVisibleJiraProjects',
+        mode: 'reject',
+      });
+      try {
+        const input = { integrationId: 'jira', mode };
+        const policies =
+          mode === 'ask'
+            ? await setIntegrationToolPoliciesCommand(adminAuth, {
+                ...input,
+                toolNames: ['listJiraProjects'],
+              })
+            : await setIntegrationToolPolicyCommand(adminAuth, {
+                ...input,
+                toolName: 'listJiraProjects',
+              });
+        const row = await db.query.deploymentMcpEnablements.findFirst({
+          where: eq(deploymentMcpEnablements.mcpId, 'jira'),
+        });
+        expect(row?.disabledTools).toEqual(['getJiraIssue']);
+        const jiraPolicies = policies.filter((p) => p.integrationId === 'jira');
+        if (mode === 'allow') expect(jiraPolicies).toEqual([]);
+        else
+          expect(jiraPolicies).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({ toolName: 'listJiraProjects', mode }),
+              expect.objectContaining({
+                toolName: 'getVisibleJiraProjects',
+                mode,
+              }),
+            ]),
+          );
+      } finally {
+        await db
+          .delete(integrationToolPolicies)
+          .where(eq(integrationToolPolicies.integrationId, 'jira'));
+      }
+    },
+  );
 
   it('loads all catalog pages even when the first page has no tools', async () => {
     await setDeploymentMcpEnabledCommand(adminAuth, {

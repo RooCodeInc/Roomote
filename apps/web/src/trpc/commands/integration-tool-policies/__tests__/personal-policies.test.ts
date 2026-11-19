@@ -45,7 +45,8 @@ vi.mock('@roomote/db/server', () => ({
   upsertIntegrationToolUserPolicy: vi.fn(),
 }));
 
-vi.mock('@roomote/types', () => ({
+vi.mock('@roomote/types', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/types')>()),
   getMcpIntegration: mockGetMcpIntegration,
 }));
 

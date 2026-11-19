@@ -109,6 +109,18 @@ const JIRA_TOOL_RENAME_GROUPS = [
   ['getJiraIssueRemoteIssueLinks', 'listJiraIssueRemoteIssueLinks'],
 ] as const;
 
+/** Names for the same built-in operation, including its pre-upgrade name. */
+export function getIntegrationMcpToolAliases(
+  integrationId: string,
+  toolName: string,
+): readonly string[] {
+  return integrationId === 'jira'
+    ? (JIRA_TOOL_RENAME_GROUPS.find((group) =>
+        group.some((name) => name === toolName),
+      ) ?? [toolName])
+    : [toolName];
+}
+
 /** Preserve disabled operations across provider tool renames without rewriting saved settings. */
 export function getIntegrationMcpDisabledToolNames(
   integrationOrId: McpIntegration | string,
