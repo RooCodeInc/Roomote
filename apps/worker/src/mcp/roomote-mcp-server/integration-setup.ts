@@ -31,11 +31,13 @@ Once connected, I can use the permitted Notion tools during both interactive tas
 
 # Jira
 
-Jira uses OAuth and requires both levels:
+Jira uses Atlassian MCP v2 OAuth and requires both levels:
 1. An admin enables Jira from the Integrations page.
 2. That admin connects Jira once for the workspace via OAuth.
 
 Once connected, I can read Jira issues, project metadata, and JQL search results using the workspace's connected Atlassian account.
+
+Existing Atlassian MCP v1 connections require an admin to reconnect Jira from the Integrations page and complete fresh OAuth consent. The built-in connection remains read-only.
 
 # monday.com
 

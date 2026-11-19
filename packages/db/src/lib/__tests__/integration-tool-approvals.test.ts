@@ -4,6 +4,9 @@ import {
   eq,
   integrationToolApprovalRequests,
   integrationToolAutoEvaluations,
+  integrationToolPolicies,
+  integrationToolUserPolicies,
+  integrationToolSessionOverrides,
   sessionFactory,
   sql,
   sessions,
@@ -44,6 +47,7 @@ import {
   getIntegrationToolAutoSettings,
   setIntegrationToolAutoSettings,
 } from '../integration-tool-auto-settings';
+import { compileTaskIntegrationToolApprovals } from '@roomote/types';
 
 const userIds: string[] = [];
 const sessionIds: string[] = [];
@@ -428,6 +432,198 @@ describe('expireIntegrationToolApproval', () => {
       await listPendingIntegrationToolApprovals({ sessionId, userId }),
     ).toHaveLength(0);
   });
+});
+
+describe('Jira tool rename compatibility', () => {
+  const oldName = 'getVisibleJiraProjects';
+  const newName = 'listJiraProjects';
+
+  it('preserves legacy deployment/personal policies, resolves conflicts strictly, and edits both names', async () => {
+    const userId = await user();
+    try {
+      // Simulate settings saved before the rename, plus a conflicting new row.
+      await db.insert(integrationToolPolicies).values([
+        { integrationId: 'jira', toolName: oldName, mode: 'ask' },
+        { integrationId: 'jira', toolName: newName, mode: 'always_allow' },
+      ]);
+      await db.insert(integrationToolUserPolicies).values({
+        userId,
+        integrationId: 'jira',
+        toolName: oldName,
+        mode: 'reject',
+      });
+      const policies = (await listIntegrationToolPolicies()).filter(
+        (p) => p.integrationId === 'jira',
+      );
+      expect(policies).toHaveLength(2);
+      expect(policies.every((p) => p.mode === 'ask')).toBe(true);
+      expect(
+        compileTaskIntegrationToolApprovals({
+          serverNames: ['jira'],
+          policies,
+          sessionOverrides: [],
+        }).permission['jira_listJiraProjects'],
+      ).toBe('ask');
+      expect(
+        (await listIntegrationToolUserPolicies(userId)).map((p) => [
+          p.toolName,
+          p.mode,
+        ]),
+      ).toEqual(
+        expect.arrayContaining([
+          [newName, 'reject'],
+          [oldName, 'reject'],
+        ]),
+      );
+
+      await upsertIntegrationToolPolicy({
+        integrationId: 'jira',
+        toolName: newName,
+        mode: 'always_allow',
+        updatedByUserId: userId,
+      });
+      expect(
+        (await listIntegrationToolPolicies())
+          .filter((p) => p.integrationId === 'jira')
+          .every((p) => p.mode === 'always_allow'),
+      ).toBe(true);
+      await upsertIntegrationToolPolicies({
+        integrationId: 'jira',
+        toolNames: [newName, oldName],
+        mode: 'allow',
+        updatedByUserId: userId,
+      });
+      await upsertIntegrationToolUserPolicy({
+        userId,
+        integrationId: 'jira',
+        toolName: newName,
+        mode: 'allow',
+      });
+      expect(
+        await db
+          .select()
+          .from(integrationToolPolicies)
+          .where(eq(integrationToolPolicies.integrationId, 'jira')),
+      ).toHaveLength(0);
+      expect(await listIntegrationToolUserPolicies(userId)).toEqual([]);
+    } finally {
+      await db
+        .delete(integrationToolPolicies)
+        .where(eq(integrationToolPolicies.integrationId, 'jira'));
+      await db
+        .delete(integrationToolUserPolicies)
+        .where(eq(integrationToolUserPolicies.userId, userId));
+    }
+  });
+
+  it('applies legacy session overrides to native v2 rules and updates the whole group after consent', async () => {
+    const userId = await user();
+    const sessionId = await ownedSession(userId);
+    await db.insert(integrationToolSessionOverrides).values({
+      sessionId,
+      integrationId: 'jira',
+      toolName: oldName,
+      mode: 'ask',
+      setByUserId: userId,
+    });
+    const sessionOverrides =
+      await listIntegrationToolSessionOverrides(sessionId);
+    expect(
+      compileTaskIntegrationToolApprovals({
+        serverNames: ['jira'],
+        policies: [],
+        sessionOverrides,
+      }).permission['jira_listJiraProjects'],
+    ).toBe('ask');
+    const pending = await insertIntegrationToolApproval(
+      { sessionId, userId },
+      {
+        integrationId: 'jira',
+        toolName: newName,
+        nativeRequestId: nextNativeRequestId(),
+        argsFingerprint: 'new-schema-call',
+        argsSummary: {},
+      },
+    );
+    await decideIntegrationToolApproval(
+      { sessionId, userId },
+      { approvalId: pending.approvalId, decision: 'approved_for_session' },
+    );
+    expect(await listIntegrationToolSessionOverrides(sessionId)).toEqual(
+      expect.arrayContaining([
+        { integrationId: 'jira', toolName: oldName, mode: 'allow' },
+        { integrationId: 'jira', toolName: newName, mode: 'allow' },
+      ]),
+    );
+    expect(
+      await listIntegrationToolSessionOverrides(await ownedSession(userId)),
+    ).toEqual([]);
+  });
+
+  it.each([
+    [oldName, newName],
+    [newName, oldName],
+  ])(
+    'serializes rejection of %s with a guarded claim of %s',
+    async (rejectedName, claimedName) => {
+      const userId = await user();
+      const sessionId = await ownedSession(userId);
+      const context = { sessionId, userId };
+      const pending = await insertIntegrationToolApproval(context, {
+        integrationId: 'jira',
+        toolName: rejectedName,
+        nativeRequestId: nextNativeRequestId(),
+        argsFingerprint: 'old-call',
+        argsSummary: {},
+      });
+      const reserved = await insertAutoApprovedIntegrationToolApproval(
+        context,
+        {
+          integrationId: 'jira',
+          toolName: claimedName,
+          nativeRequestId: nextNativeRequestId(),
+          argsFingerprint: 'new-call',
+          argsSummary: {},
+        },
+      );
+      let claim: Promise<boolean> | undefined;
+      let settled = false;
+      await db.transaction(async (tx) => {
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(hashtextextended(${`integration-tool-rejection:${sessionId}:jira:${rejectedName}`}, 0))`,
+        );
+        await tx
+          .update(integrationToolApprovalRequests)
+          .set({ status: 'rejected', decidedByUserId: userId })
+          .where(eq(integrationToolApprovalRequests.id, pending.approvalId));
+        claim = claimAutoApprovedIntegrationToolApproval({
+          approvalId: reserved.approvalId,
+          requesterUserId: userId,
+          unlessToolRejected: {
+            sessionId,
+            integrationId: 'jira',
+            toolName: claimedName,
+          },
+        }).then((result) => {
+          settled = true;
+          return result;
+        });
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        expect(settled).toBe(false);
+      });
+      await expect(claim).resolves.toBe(false);
+      expect(
+        await hasRejectedIntegrationToolInSession({
+          ...context,
+          integrationId: 'jira',
+          toolName: claimedName,
+        }),
+      ).toBe(true);
+      expect(
+        (await getIntegrationToolApproval(reserved.approvalId))?.status,
+      ).toBe('cancelled');
+    },
+  );
 });
 
 describe('auto-approved reservations', () => {

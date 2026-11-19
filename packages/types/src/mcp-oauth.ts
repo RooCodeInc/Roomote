@@ -595,17 +595,31 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
   {
     id: 'jira',
     name: 'Jira',
-    url: 'https://mcp.atlassian.com/v1/mcp/authv2',
+    // Flat tools keep the Jira-only policy enforceable without generic executors.
+    url: 'https://mcp.atlassian.com/v2/mcp?tools=all',
     description: `Access Jira issues, projects, workflows, and JQL search from ${PRODUCT_NAME} tasks`,
     icon: 'jira',
     connectionScope: 'deployment',
+    // The host-root discovery document still advertises v1. These endpoints
+    // come from the issuer advertised by v2's protected-resource metadata.
+    oauthEndpoints: {
+      authorizationEndpoint: 'https://auth.atlassian.com/authorize',
+      tokenEndpoint: 'https://auth.atlassian.com/oauth/token',
+      registrationEndpoint:
+        'https://auth.atlassian.com/VCeDsk8ZHncYF1g234fKtc4lNipbBhu3/dcr/register',
+      tokenEndpointAuthMethod: 'none',
+    },
+    oauthResource: 'https://mcp.atlassian.com/v2/mcp',
     oauthScopes: [
       'read:me',
       'read:account',
       'offline_access',
-      'read:jira-work',
-      'search:jira-work',
+      'read:jira:agent-interface',
+      'search:jira:agent-interface',
     ],
+    oauthScopeMode: 'read-only',
+    instructions:
+      'Use Jira to read issues, projects, workflow metadata, and JQL search results. This connection is read-only and exposes individual Jira tools. Call getAccessibleAtlassianResources to obtain the cloudId before reading Jira data. Existing Atlassian MCP v1 connections must be reconnected by a deployment admin for v2 OAuth consent.',
   },
   {
     id: 'linear',

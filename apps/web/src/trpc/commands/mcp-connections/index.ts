@@ -14,6 +14,7 @@ import {
   DEFAULT_OPENAI_REALTIME_VOICE_ID,
   getDefaultMcpConnectionRole,
   getAllowedIntegrationMcpToolNames,
+  getIntegrationMcpDisabledToolNames,
   getMcpIntegration,
   getMcpIntegrationConnectionMode,
   getMcpIntegrationConnectionScope,
@@ -426,6 +427,8 @@ async function fetchUpstreamMcpTools(input: {
       signal: AbortSignal.timeout(MCP_TOOL_CATALOG_TIMEOUT_MS),
     });
 
+  const sessionHeaders: Record<string, string> = {};
+
   async function listToolsWithInitializedSession(): Promise<{
     response: Response;
     responseBody: string;
@@ -459,9 +462,7 @@ async function fetchUpstreamMcpTools(input: {
       });
     }
 
-    const sessionHeaders: Record<string, string> = {
-      'mcp-protocol-version': MCP_PROTOCOL_VERSION,
-    };
+    sessionHeaders['mcp-protocol-version'] = MCP_PROTOCOL_VERSION;
     const sessionId = initializeResponse.headers.get('mcp-session-id');
     if (sessionId) {
       sessionHeaders['mcp-session-id'] = sessionId;
@@ -523,46 +524,76 @@ async function fetchUpstreamMcpTools(input: {
     ({ response, responseBody } = await listToolsWithInitializedSession());
   }
 
-  if (!response.ok) {
-    throw buildUpstreamToolLoadError({
-      response,
-      responseBody,
-      action: 'load tools',
-    });
-  }
-
-  const payload = parseMcpJsonRpcPayload(
-    responseBody,
-    response.headers.get('content-type'),
-  ) as McpToolsListJsonRpcPayload | null;
-
-  if (!payload) {
-    throw new Error(
-      `Failed to load tools from ${resolvedIntegration.name}: upstream tools/list returned an invalid payload.`,
-    );
-  }
-
-  if (payload.error) {
-    const upstreamMessage =
-      typeof payload.error.message === 'string' &&
-      payload.error.message.trim().length > 0
-        ? payload.error.message.trim()
-        : 'upstream MCP server returned a JSON-RPC error';
-    if (shouldReconnectFromUpstreamError(null, upstreamMessage)) {
-      throw new Error(reconnectMessage);
+  const tools: Array<Record<string, unknown>> = [];
+  const seenCursors = new Set<string>();
+  while (true) {
+    if (!response.ok) {
+      throw buildUpstreamToolLoadError({
+        response,
+        responseBody,
+        action: 'load tools',
+      });
     }
-    throw new Error(
-      `Failed to load tools from ${resolvedIntegration.name}: ${upstreamMessage}`,
-    );
-  }
 
-  if (!Array.isArray(payload.result?.tools)) {
-    throw new Error(
-      `Failed to load tools from ${resolvedIntegration.name}: upstream tools/list returned an invalid payload.`,
-    );
-  }
+    const payload = parseMcpJsonRpcPayload(
+      responseBody,
+      response.headers.get('content-type'),
+    ) as McpToolsListJsonRpcPayload | null;
 
-  const tools = payload.result.tools;
+    if (!payload) {
+      throw new Error(
+        `Failed to load tools from ${resolvedIntegration.name}: upstream tools/list returned an invalid payload.`,
+      );
+    }
+
+    if (payload.error) {
+      const upstreamMessage =
+        typeof payload.error.message === 'string' &&
+        payload.error.message.trim().length > 0
+          ? payload.error.message.trim()
+          : 'upstream MCP server returned a JSON-RPC error';
+      if (shouldReconnectFromUpstreamError(null, upstreamMessage)) {
+        throw new Error(reconnectMessage);
+      }
+      throw new Error(
+        `Failed to load tools from ${resolvedIntegration.name}: ${upstreamMessage}`,
+      );
+    }
+
+    if (!Array.isArray(payload.result?.tools)) {
+      throw new Error(
+        `Failed to load tools from ${resolvedIntegration.name}: upstream tools/list returned an invalid payload.`,
+      );
+    }
+
+    tools.push(...payload.result.tools);
+    const cursor = payload.result.nextCursor;
+    if (cursor === undefined || cursor === null || cursor === '') break;
+    if (
+      typeof cursor !== 'string' ||
+      seenCursors.has(cursor) ||
+      seenCursors.size >= 100
+    ) {
+      throw new Error(
+        `Failed to load tools from ${resolvedIntegration.name}: invalid tool catalog pagination.`,
+      );
+    }
+    seenCursors.add(cursor);
+    // Preserve the session for every page, including servers that allow the
+    // initial tools/list without an explicit initialize exchange.
+    const sessionId = response.headers.get('mcp-session-id');
+    if (sessionId) sessionHeaders['mcp-session-id'] = sessionId;
+    response = await postJsonRpc(
+      {
+        jsonrpc: '2.0',
+        id: seenCursors.size + 2,
+        method: 'tools/list',
+        params: { cursor },
+      },
+      sessionHeaders,
+    );
+    responseBody = await response.text();
+  }
   const toolDefinitions = tools.flatMap((tool) =>
     typeof tool.name === 'string'
       ? [
@@ -580,11 +611,15 @@ async function fetchUpstreamMcpTools(input: {
   const visibleTools = filterMcpToolDefinitions(toolDefinitions, {
     allowedToolNames,
   });
+  const disabledToolNames = getIntegrationMcpDisabledToolNames(
+    resolvedIntegration,
+    input.disabledTools,
+  );
 
   return visibleTools.map((tool) => ({
     ...tool,
     enabled: isMcpToolAllowed(tool.name, {
-      disabledToolNames: input.disabledTools,
+      disabledToolNames,
     }),
   }));
 }

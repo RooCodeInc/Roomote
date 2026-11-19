@@ -1,6 +1,6 @@
 export type McpToolsListJsonRpcPayload = {
   error?: { code?: unknown; message?: unknown };
-  result?: { tools?: Array<Record<string, unknown>> };
+  result?: { tools?: Array<Record<string, unknown>>; nextCursor?: unknown };
 };
 
 /**

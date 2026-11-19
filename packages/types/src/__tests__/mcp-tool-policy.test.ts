@@ -1,6 +1,7 @@
 import {
   filterMcpToolDefinitions,
   getAllowedIntegrationMcpToolNames,
+  getIntegrationMcpDisabledToolNames,
 } from '../mcp-tool-policy';
 
 describe('Better Stack MCP tool policy', () => {
@@ -51,6 +52,61 @@ describe('Better Stack MCP tool policy', () => {
         disabledToolNames: ['query'],
       }),
     ).toEqual(tools.slice(0, 2));
+  });
+});
+
+describe('Jira MCP v2 tool policy', () => {
+  it('preserves disabled operations across renames without affecting other integrations', () => {
+    expect(
+      getIntegrationMcpDisabledToolNames('jira', ['getVisibleJiraProjects']),
+    ).toEqual(['getVisibleJiraProjects', 'listJiraProjects']);
+    expect(
+      getIntegrationMcpDisabledToolNames('jira', ['listJiraIssueTransitions']),
+    ).toEqual(['listJiraIssueTransitions', 'getTransitionsForJiraIssue']);
+    expect(
+      getIntegrationMcpDisabledToolNames('other', ['getVisibleJiraProjects']),
+    ).toEqual(['getVisibleJiraProjects']);
+  });
+  it('allows equivalent v2 reads while excluding executors, mutations, and other products', () => {
+    const reads = [
+      'atlassianUserInfo',
+      'getAccessibleAtlassianResources',
+      'getJiraIssue',
+      'getJiraIssueTypeMetaWithFields',
+      'listJiraProjects',
+      'listJiraProjectIssueTypesMetadata',
+      'listJiraIssueLinkTypes',
+      'listJiraIssueTransitions',
+      'listJiraIssueRemoteIssueLinks',
+      'lookupJiraAccountId',
+      'searchJiraIssuesUsingJql',
+    ];
+    const excluded = [
+      'discover',
+      'execute',
+      'executeRead',
+      'executeWrite',
+      'executeDestructive',
+      'createJiraIssue',
+      'editJiraIssue',
+      'transitionJiraIssue',
+      'addOrEditJiraIssueComment',
+      'deleteJiraIssue',
+      'updateJiraScreen',
+      'getConfluenceContent',
+      'getTeamworkGraphContext',
+      'search',
+      'unverifiedHelper',
+    ];
+    const tools = [...reads, ...excluded].map((name) => ({ name }));
+    expect(
+      filterMcpToolDefinitions(tools, {
+        allowedToolNames: getAllowedIntegrationMcpToolNames('jira'),
+        disabledToolNames: ['getJiraIssue'],
+      }),
+    ).toEqual(
+      reads.filter((name) => name !== 'getJiraIssue').map((name) => ({ name })),
+    );
   });
 });
 

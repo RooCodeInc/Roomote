@@ -58,6 +58,28 @@ export type McpToolDefinition = {
   inputSchema?: unknown;
 };
 
+async function listAllToolDefinitions(
+  client: Awaited<ReturnType<typeof createCancellableMcpClient>>,
+  signal?: AbortSignal,
+) {
+  const definitions = await client.listTools({ options: { signal } });
+  const seenCursors = new Set<string>();
+  let cursor = definitions.nextCursor;
+  while (cursor) {
+    if (seenCursors.has(cursor) || seenCursors.size >= 100) {
+      throw new Error('MCP tool catalog pagination did not terminate.');
+    }
+    seenCursors.add(cursor);
+    const page = await client.listTools({
+      params: { cursor },
+      options: { signal },
+    });
+    definitions.tools.push(...page.tools);
+    cursor = page.nextCursor;
+  }
+  return { ...definitions, nextCursor: undefined };
+}
+
 /** List the tools exposed by a streamable-http MCP server. */
 export async function listMcpTools(options: {
   url: string;
@@ -67,9 +89,7 @@ export async function listMcpTools(options: {
   const client = await createCancellableMcpClient(options);
 
   try {
-    const definitions = await client.listTools({
-      options: { signal: options.signal },
-    });
+    const definitions = await listAllToolDefinitions(client, options.signal);
     return definitions.tools.map((definition) => ({
       name: definition.name,
       ...(definition.description
@@ -111,9 +131,7 @@ export async function callMcpTool(options: {
   const client = await createCancellableMcpClient(options);
 
   try {
-    const definitions = await client.listTools({
-      options: { signal: options.signal },
-    });
+    const definitions = await listAllToolDefinitions(client, options.signal);
     const toolDefinition = definitions.tools.find(
       (tool) => tool.name === options.toolName,
     );

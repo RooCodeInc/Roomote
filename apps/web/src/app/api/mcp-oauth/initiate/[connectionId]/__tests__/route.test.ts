@@ -552,6 +552,52 @@ describe('GET /api/mcp-oauth/initiate/[connectionId]', () => {
     expect(authUrl.searchParams.get('scope')).not.toContain('boards:write');
   });
 
+  it('registers Jira against the v2 issuer with PKCE, resource, and read-only scopes', async () => {
+    const types =
+      await vi.importActual<typeof import('@roomote/types')>('@roomote/types');
+    const integration = types.getMcpIntegration('jira')!;
+    mcpConnectionsFindFirstMock.mockResolvedValue({
+      id: CONNECTION_ID,
+      mcpId: 'jira',
+      userId: null,
+      connectionRole: 'default',
+    });
+    getMcpIntegrationMock.mockReturnValue(integration);
+    isDeploymentScopedMcpIntegrationMock.mockReturnValue(true);
+    getMcpIntegrationOauthEndpointsMock.mockReturnValue(
+      integration.oauthEndpoints,
+    );
+    getMcpIntegrationOauthScopesMock.mockReturnValue(integration.oauthScopes);
+    getMcpIntegrationOauthResourceMock.mockReturnValue(
+      integration.oauthResource,
+    );
+    getClientInformationMock.mockResolvedValue(undefined);
+
+    const response = await GET(buildRequest(), {
+      params: Promise.resolve({ connectionId: CONNECTION_ID }),
+    });
+    expect(registerOAuthClientMock).toHaveBeenCalledWith(
+      integration.oauthEndpoints!.registrationEndpoint,
+      expect.objectContaining({
+        scope: integration.oauthScopes!.join(' '),
+        token_endpoint_auth_method: 'none',
+      }),
+    );
+    const authUrl = new URL(response.headers.get('location')!);
+    expect(authUrl.origin + authUrl.pathname).toBe(
+      'https://auth.atlassian.com/authorize',
+    );
+    expect(authUrl.searchParams.get('resource')).toBe(
+      'https://mcp.atlassian.com/v2/mcp',
+    );
+    expect(authUrl.searchParams.get('scope')).toBe(
+      integration.oauthScopes!.join(' '),
+    );
+    expect(authUrl.searchParams.get('code_challenge_method')).toBe('S256');
+    expect(discoverOAuthEndpointsMock).not.toHaveBeenCalled();
+    expect(discoverOAuthProtectedResourceMetadataMock).not.toHaveBeenCalled();
+  });
+
   it('requests full access for the deployment-scoped Resend connection', async () => {
     mcpConnectionsFindFirstMock.mockResolvedValue({
       id: CONNECTION_ID,

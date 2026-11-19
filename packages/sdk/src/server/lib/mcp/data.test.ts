@@ -201,6 +201,48 @@ describe('getClientInformation', () => {
     expect(requestSignal?.aborted).toBe(true);
   });
 
+  it('refreshes Jira v2 tokens against the new issuer with the canonical resource', async () => {
+    findFirstMock.mockResolvedValue({
+      id: 'conn-1',
+      mcpId: 'jira',
+      accessToken: 'expired-token',
+      refreshToken: 'jira-refresh',
+      tokenExpiresAt: new Date(Date.now() - 60_000),
+      scopes: ['read:jira:agent-interface'],
+      authConfig: {
+        type: 'oauth_client',
+        client_id: 'jira-v2-client',
+        registered_redirect_uri:
+          'https://customer.example/api/mcp-oauth/callback',
+        token_endpoint_auth_method: 'none',
+      },
+    });
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json({
+        access_token: 'fresh-access-token',
+        refresh_token: 'new-jira-refresh',
+        expires_in: 3600,
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(
+      getValidAccessToken(
+        'conn-1',
+        'https://mcp.atlassian.com/v2/mcp?tools=all',
+      ),
+    ).resolves.toBe('fresh-access-token');
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      'https://auth.atlassian.com/oauth/token',
+    );
+    const body = new URLSearchParams(
+      fetchMock.mock.calls[0]?.[1]?.body as string,
+    );
+    expect(body.get('resource')).toBe('https://mcp.atlassian.com/v2/mcp');
+    expect(body.get('client_id')).toBe('jira-v2-client');
+    expect(body.get('refresh_token')).toBe('jira-refresh');
+  });
+
   it('includes the monday.com MCP resource when refreshing tokens', async () => {
     findFirstMock.mockResolvedValue({
       id: 'conn-1',

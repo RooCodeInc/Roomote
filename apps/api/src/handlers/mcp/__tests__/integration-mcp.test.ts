@@ -543,6 +543,82 @@ describe('createIntegrationMcpProxy acting-user scoping', () => {
     expect(cancelled).toBe(true);
   });
 
+  it('preserves Jira pagination while filtering v2 flat tools and disabled reads', async () => {
+    mockFindTaskRun.mockResolvedValue({ id: 42, actingUserId: null });
+    mockFindConnection.mockResolvedValue({ id: 'conn-jira', userId: null });
+    mockFindEnablement.mockResolvedValue({ disabledTools: ['getJiraIssue'] });
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json({
+        jsonrpc: '2.0',
+        id: 1,
+        result: {
+          tools: [
+            'listJiraProjects',
+            'getJiraIssue',
+            'executeRead',
+            'executeWrite',
+            'getConfluenceContent',
+            'editJiraIssue',
+          ].map((name) => ({ name })),
+          nextCursor: 'page-2',
+        },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const response = await postMcp(createApp('jira', createRunToken()), {
+      ...createToolsListRequest(1),
+      params: { cursor: 'page-1' },
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      result: {
+        tools: [{ name: 'listJiraProjects' }],
+        nextCursor: 'page-2',
+      },
+    });
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      'https://mcp.atlassian.com/v2/mcp?tools=all',
+    );
+    expect(
+      JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string).params.cursor,
+    ).toBe('page-1');
+  });
+
+  it('keeps a renamed Jira read disabled by its saved v1 name', async () => {
+    mockFindTaskRun.mockResolvedValue({ id: 42, actingUserId: null });
+    mockFindConnection.mockResolvedValue({ id: 'conn-jira', userId: null });
+    mockFindEnablement.mockResolvedValue({
+      disabledTools: ['getVisibleJiraProjects'],
+    });
+    const fetchMock = stubUpstreamFetch();
+    const response = await postMcp(
+      createApp('jira', createRunToken()),
+      createToolCallRequest(1, 'listJiraProjects'),
+    );
+    expect(response.status).toBe(403);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'executeRead',
+    'executeWrite',
+    'executeDestructive',
+    'editJiraIssue',
+    'getConfluenceContent',
+    'getJiraIssue',
+  ])('rejects Jira call %s before forwarding upstream', async (name) => {
+    mockFindTaskRun.mockResolvedValue({ id: 42, actingUserId: null });
+    mockFindConnection.mockResolvedValue({ id: 'conn-jira', userId: null });
+    mockFindEnablement.mockResolvedValue({ disabledTools: ['getJiraIssue'] });
+    const fetchMock = stubUpstreamFetch();
+    const response = await postMcp(
+      createApp('jira', createRunToken()),
+      createToolCallRequest(1, name),
+    );
+    expect(response.status).toBe(403);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('strips Resend tool schema patterns for Azure-compatible tool calls', async () => {
     mockFindTaskRun.mockResolvedValue({ id: 42, actingUserId: null });
     mockFindConnection.mockResolvedValue({ id: 'conn-1', userId: null });

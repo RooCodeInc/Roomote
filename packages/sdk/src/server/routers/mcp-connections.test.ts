@@ -953,7 +953,7 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
 
     expect(getValidAccessToken).toHaveBeenCalledWith(
       'conn-jira',
-      'https://mcp.atlassian.com/v1/mcp/authv2',
+      'https://mcp.atlassian.com/v2/mcp?tools=all',
     );
 
     expect(result).toEqual({
