@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { SetupModelProviderId, SetupModelStatus } from '@roomote/types';
+import { getSetupModelProvider } from '@roomote/types';
 
 import { splitInferenceProviders } from './taskModelProviderSetup';
 
@@ -1238,6 +1239,57 @@ describe('InferenceProviderSection', () => {
     });
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
+
+  it.each([undefined, 'responses'])(
+    'restores the API protocol and saves a named connection without changing its ID (protocol=%s)',
+    async (protocol) => {
+      const { providerSetup } = buildProviderSetup();
+      const descriptor = getSetupModelProvider('openai-compatible-native');
+      providerSetup.providers = [
+        {
+          ...descriptor,
+          runtimeApiKeySatisfied: false,
+          savedApiKeySatisfied: true,
+          additionalEnvValues: {
+            OPENAI_COMPATIBLE_NATIVE_BASE_URL: 'https://gateway.example/v1',
+            ...(protocol
+              ? { OPENAI_COMPATIBLE_NATIVE_PROTOCOL: protocol }
+              : {}),
+          },
+        },
+      ];
+      providerSetupData.current = { providerSetup };
+      mutateAsyncMock.mockResolvedValue({
+        addedRecommendedModelCount: 0,
+        addedDiscoveredModelCount: 0,
+        discoveryError: null,
+      });
+      renderInferenceProviderSection();
+      fireEvent.click(
+        screen.getByRole('button', {
+          name: `Edit ${descriptor.label} Endpoint URL`,
+        }),
+      );
+      expect(
+        screen.getByRole('combobox', {
+          name: `API protocol for ${descriptor.label}`,
+        }),
+      ).toHaveTextContent(
+        protocol === 'responses' ? 'Responses API' : 'Chat Completions',
+      );
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+      });
+      expect(mutateAsyncMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          provider: 'openai-compatible-native',
+          additionalEnvValues: expect.objectContaining({
+            OPENAI_COMPATIBLE_NATIVE_PROTOCOL: protocol ?? 'chat-completions',
+          }),
+        }),
+      );
+    },
+  );
 
   it('saves an OpenAI-compatible endpoint without resubmitting the base URL as additional env', async () => {
     const { providerSetup } = buildProviderSetup();

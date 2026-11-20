@@ -341,6 +341,46 @@ describe('inference gateway', () => {
     );
   });
 
+  it.each(['openai-compatible', 'openai-compatible-native'])(
+    'proxies %s Responses streams and tool outputs unchanged with a custom path prefix',
+    async (providerId) => {
+      const provider = getInferenceGatewayProvider(providerId)!;
+      mockResolveModelProviderEnvValue.mockImplementation(
+        async (names: string | readonly string[]) => {
+          const list = typeof names === 'string' ? [names] : names;
+          return list.includes(provider.upstreamBaseUrlEnvVarName!)
+            ? 'https://gateway.example/prefix/v1'
+            : undefined;
+        },
+      );
+      const stream =
+        'data: {"type":"response.completed","response":{"status":"completed"}}\n\n';
+      const fetchMock = stubUpstreamFetch(
+        new Response(stream, {
+          headers: { 'content-type': 'text/event-stream' },
+        }),
+      );
+      const payload = {
+        model: 'custom/model',
+        stream: true,
+        input: [
+          { type: 'function_call_output', call_id: 'call_1', output: 'pong' },
+        ],
+      };
+      const response = await appRequest(
+        createApp(createRunToken()),
+        `/api/inference/${providerId}/v1/responses`,
+        payload,
+      );
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe(stream);
+      const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe('https://gateway.example/prefix/v1/responses');
+      expect(await new Response(init.body).json()).toEqual(payload);
+      expect(new Headers(init.headers).has('authorization')).toBe(false);
+    },
+  );
+
   it('routes Roomote models through OpenRouter with only the managed key', async () => {
     const fetchMock = stubUpstreamFetch();
     const response = await appRequest(

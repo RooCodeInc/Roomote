@@ -244,6 +244,8 @@ manifest changes.
 | `OPENAI_COMPATIBLE_<NAME>_BASE_URL`    | OpenAI-compatible | Endpoint URL for a named OpenAI-compatible connection (see Settings > Models). Example: `OPENAI_COMPATIBLE_COMPANY_PROXY_BASE_URL`. |
 | `OPENAI_COMPATIBLE_<NAME>_API_KEY`     | Optional     | Bearer API key for that named OpenAI-compatible connection.                                                                              |
 | `OPENAI_COMPATIBLE_<NAME>_LABEL`       | Optional     | Display label stored with a named OpenAI-compatible connection.                                                                          |
+| `OPENAI_COMPATIBLE_PROTOCOL` | Optional | Default connection API protocol: `chat-completions` (default) or `responses`. |
+| `OPENAI_COMPATIBLE_<NAME>_PROTOCOL` | Optional | API protocol for a named connection: `chat-completions` (default) or `responses`. |
 | `VLLM_BASE_URL`                        | vLLM         | vLLM OpenAI-compatible endpoint URL, usually including its `/v1` path.                                                                  |
 | `VLLM_API_KEY`                         | Optional     | Bearer API key for a vLLM endpoint that requires authentication.                                                                        |
 | `R_BRAIN_OPENROUTER_API_KEY`           | Memory provider | OpenRouter key that enables Memory embeddings and synthesis.                                                             |

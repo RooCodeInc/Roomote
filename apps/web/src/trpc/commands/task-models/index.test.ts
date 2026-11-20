@@ -2192,6 +2192,7 @@ describe('task model provider commands', () => {
       'ZAI_REGION',
       'ZAI_CODING_PLAN_REGION',
       'OPENAI_COMPATIBLE_BASE_URL',
+      'OPENAI_COMPATIBLE_PROTOCOL',
       'LITELLM_BASE_URL',
       'OLLAMA_BASE_URL',
       'VLLM_BASE_URL',

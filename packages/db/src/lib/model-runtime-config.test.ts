@@ -90,6 +90,46 @@ import {
 } from '@roomote/types';
 
 describe('resolveEffectiveModelRuntimeEnv', () => {
+  it.each([false, true])(
+    'propagates selected and switchable connection protocols with gateway=%s',
+    async (gateway) => {
+      mockDeploymentSettingsFindFirst.mockResolvedValue({
+        runtimeModelConfig: {},
+        taskModelSettings: {
+          models: [
+            {
+              id: 'openai-compatible-other/model',
+              displayName: 'Other',
+              family: 'Custom',
+            },
+          ],
+          allowedModelIds: ['openai-compatible-other/model'],
+          defaultModelId: 'openai-compatible-other/model',
+        },
+      });
+      const options = {
+        runtimeEnv: {
+          R_MODEL: 'openai-compatible-native/model',
+          R_MODEL_ENV_KEYS: 'OPENAI_COMPATIBLE_NATIVE_API_KEY',
+        },
+        deploymentEnvVars: {
+          OPENAI_COMPATIBLE_NATIVE_BASE_URL: 'https://gateway.example/v1',
+          OPENAI_COMPATIBLE_NATIVE_API_KEY: 'private-key',
+          OPENAI_COMPATIBLE_NATIVE_PROTOCOL: 'responses',
+          OPENAI_COMPATIBLE_OTHER_PROTOCOL: 'chat-completions',
+        },
+      };
+      const env = await (gateway
+        ? resolveSandboxModelRuntimeEnv(options)
+        : resolveEffectiveModelRuntimeEnv(options));
+      expect(env.OPENAI_COMPATIBLE_NATIVE_PROTOCOL).toBe('responses');
+      if (gateway) {
+        expect(env.OPENAI_COMPATIBLE_NATIVE_API_KEY).toBeUndefined();
+        expect(env.OPENAI_COMPATIBLE_OTHER_PROTOCOL).toBe('chat-completions');
+        expect(env.R_INFERENCE_GATEWAY_KEYS).not.toContain('PROTOCOL');
+      } else expect(env.OPENAI_COMPATIBLE_NATIVE_API_KEY).toBe('private-key');
+    },
+  );
   beforeEach(() => {
     vi.clearAllMocks();
     mockDecryptSecrets.mockImplementation(async (value) => value);
