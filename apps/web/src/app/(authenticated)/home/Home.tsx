@@ -169,7 +169,7 @@ export function Home({
 
   return (
     <>
-      <div className="flex flex-1 md:items-center justify-center h-[calc(var(--effective-viewport-height)-4rem)] md:h-[calc(var(--effective-viewport-height)-1rem)]">
+      <div className="flex min-w-0 flex-1 md:items-center justify-center h-[calc(var(--effective-viewport-height)-4rem)] md:h-[calc(var(--effective-viewport-height)-1rem)]">
         <div
           className={cn(
             'flex w-full max-w-3xl flex-col justify-center px-4 h-full',
