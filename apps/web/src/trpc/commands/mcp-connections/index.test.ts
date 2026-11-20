@@ -10,6 +10,19 @@ import {
   isMcpConnectionExaConfig,
   isMcpConnectionVoiceConfig,
 } from '@roomote/types';
+import { listMcpTools } from '@roomote/cloud-agents/server';
+import { startMcpToolTestServer } from '../../../../../../packages/cloud-agents/src/server/__tests__/mcp-tool-client-fixture';
+
+vi.mock('@roomote/cloud-agents/server', async () => ({
+  isMcpAuthenticationError: (
+    await import('../../../../../../packages/cloud-agents/src/server/mcp-tool-client')
+  ).isMcpAuthenticationError,
+  listMcpTools: vi.fn(),
+}));
+vi.mock('@roomote/sdk/server', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/sdk/server')>()),
+  getValidAccessToken: vi.fn(async () => 'synthetic-catalog-token'),
+}));
 
 const { captureEventMock } = vi.hoisted(() => ({
   captureEventMock: vi.fn(),
@@ -92,12 +105,69 @@ describe('MCP connection lifecycle telemetry', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     vi.unstubAllGlobals();
+    vi.mocked(listMcpTools).mockReset();
     getDeploymentStaticOauthReadinessMock.mockResolvedValue('ready');
     resolveModelProviderEnvValueMock.mockResolvedValue(undefined);
     await cleanup();
   });
 
   afterAll(cleanup);
+
+  it('loads the admin catalog through the real shared client and an initialized paginated server', async () => {
+    const { listMcpTools: realListMcpTools } =
+      await import('../../../../../../packages/cloud-agents/src/server/mcp-tool-client');
+    vi.mocked(listMcpTools).mockImplementation(realListMcpTools);
+    const endpoint = await startMcpToolTestServer(() => ({ content: [] }), {
+      listTools: (request) =>
+        request.params?.cursor === 'next'
+          ? {
+              tools: [
+                {
+                  name: 'getJiraIssue',
+                  inputSchema: { type: 'object' },
+                  annotations: { readOnlyHint: true },
+                },
+                { name: 'listJiraProjects', inputSchema: { type: 'object' } },
+              ],
+            }
+          : {
+              tools: [
+                { name: 'createJiraIssue', inputSchema: { type: 'object' } },
+              ],
+              nextCursor: 'next',
+            },
+    });
+    const realFetch = globalThis.fetch;
+    vi.stubGlobal('fetch', (_url: string | URL, init?: RequestInit) =>
+      realFetch(endpoint.url, init),
+    );
+    try {
+      await connectMcpCommand(adminAuth, { mcpId: 'jira' });
+      await db
+        .update(mcpConnections)
+        .set({ enabled: true, authStatus: 'authenticated' })
+        .where(eq(mcpConnections.mcpId, 'jira'));
+      await setDeploymentMcpEnabledCommand(adminAuth, {
+        mcpId: 'jira',
+        enabled: true,
+      });
+      await db
+        .update(deploymentMcpEnablements)
+        .set({ disabledTools: ['getVisibleJiraProjects'] })
+        .where(eq(deploymentMcpEnablements.mcpId, 'jira'));
+      await expect(
+        listDeploymentMcpIntegrationToolsCommand(adminAuth, { mcpId: 'jira' }),
+      ).resolves.toMatchObject({
+        tools: [
+          { name: 'getJiraIssue', readOnly: true, enabled: true },
+          { name: 'listJiraProjects', enabled: false },
+        ],
+      });
+    } finally {
+      await endpoint.close();
+      vi.unstubAllGlobals();
+    }
+  });
 
   it('clears a legacy Jira client registration when reconnecting for v2 consent', async () => {
     await connectMcpCommand(adminAuth, { mcpId: 'jira' });
@@ -126,66 +196,60 @@ describe('MCP connection lifecycle telemetry', () => {
     });
   });
 
-  it('loads all catalog pages even when the first page has no tools', async () => {
+  it('delegates discovery and preserves read-only annotations and catalog policy', async () => {
     await setDeploymentMcpEnabledCommand(adminAuth, {
       mcpId: 'exa',
       enabled: true,
     });
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        Response.json(
-          { result: { tools: [], nextCursor: 'page-2' } },
-          { headers: { 'mcp-session-id': 'catalog-session' } },
-        ),
-      )
-      .mockResolvedValueOnce(
-        Response.json({ result: { tools: [{ name: 'web_search_exa' }] } }),
-      );
-    vi.stubGlobal('fetch', fetchMock);
+    vi.mocked(listMcpTools).mockResolvedValue([
+      { name: 'web_search_exa', annotations: { readOnlyHint: true } },
+    ]);
     await expect(
       listDeploymentMcpIntegrationToolsCommand(adminAuth, { mcpId: 'exa' }),
-    ).resolves.toMatchObject({ tools: [{ name: 'web_search_exa' }] });
-    expect(JSON.parse(fetchMock.mock.calls[1]?.[1]?.body).params).toEqual({
-      cursor: 'page-2',
+    ).resolves.toMatchObject({
+      tools: [{ name: 'web_search_exa', readOnly: true, enabled: true }],
     });
-    expect(fetchMock.mock.calls[1]?.[1]?.headers['mcp-session-id']).toBe(
-      'catalog-session',
-    );
+    expect(listMcpTools).toHaveBeenCalledWith({
+      url: expect.stringContaining('https://mcp.exa.ai/'),
+      headers: {},
+      signal: expect.any(AbortSignal),
+    });
   });
 
-  it('rejects a repeated cursor rather than silently returning a partial catalog', async () => {
+  it.each([
+    [
+      new Error('MCP tool catalog pagination did not terminate.'),
+      'Failed to load tools from Exa. Please try again.',
+    ],
+    [
+      new Error('synthetic-secret from upstream'),
+      'Failed to load tools from Exa. Please try again.',
+    ],
+    [
+      new Error('invalid_token synthetic-secret'),
+      'Exa needs to be reconnected before tools can be managed.',
+    ],
+    [
+      new Error('wrapped', {
+        cause: new Error('expired access token synthetic-secret'),
+      }),
+      'Exa needs to be reconnected before tools can be managed.',
+    ],
+  ])('presents safe catalog errors for %s', async (error, message) => {
     await setDeploymentMcpEnabledCommand(adminAuth, {
       mcpId: 'exa',
       enabled: true,
     });
-    vi.stubGlobal(
-      'fetch',
-      vi
-        .fn()
-        .mockImplementation(async () =>
-          Response.json({ result: { tools: [], nextCursor: 'repeated' } }),
-        ),
-    );
+    vi.mocked(listMcpTools).mockRejectedValue(error);
     await expect(
       listDeploymentMcpIntegrationToolsCommand(adminAuth, { mcpId: 'exa' }),
-    ).rejects.toThrow('invalid tool catalog pagination');
+    ).rejects.toThrow(message);
   });
 
   it('validates and encrypts a deployment-wide Exa API key before connecting', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          jsonrpc: '2.0',
-          id: 1,
-          result: {
-            tools: [{ name: 'web_search_exa', description: 'Search the web' }],
-          },
-        }),
-        { status: 200, headers: { 'content-type': 'application/json' } },
-      ),
-    );
-    vi.stubGlobal('fetch', fetchMock);
+    vi.mocked(listMcpTools).mockResolvedValue([
+      { name: 'web_search_exa', description: 'Search the web' },
+    ]);
 
     await saveExaConnectionCommand(adminAuth, { apiKey: 'exa-secret' });
 
@@ -197,13 +261,11 @@ describe('MCP connection lifecycle telemetry', () => {
     expect(isMcpConnectionExaConfig(connection?.authConfig)).toBe(true);
     expect(JSON.stringify(connection?.authConfig)).not.toContain('exa-secret');
 
-    const requestHeaders = fetchMock.mock.calls[0]?.[1]?.headers as Record<
-      string,
-      string
-    >;
+    const requestHeaders = vi.mocked(listMcpTools).mock.calls[0]?.[0]
+      ?.headers as Record<string, string>;
     expect(requestHeaders['x-api-key']).toBe('exa-secret');
     expect(requestHeaders.authorization).toBeUndefined();
-    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+    expect(vi.mocked(listMcpTools).mock.calls[0]?.[0]?.url).toBe(
       'https://mcp.exa.ai/mcp?tools=web_search_exa,web_fetch_exa,web_search_advanced_exa,agent_run',
     );
     const enablements = await db
@@ -214,15 +276,7 @@ describe('MCP connection lifecycle telemetry', () => {
   });
 
   it('does not persist an Exa connection when upstream validation fails', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ error: 'invalid API key' }), {
-          status: 401,
-          headers: { 'content-type': 'application/json' },
-        }),
-      ),
-    );
+    vi.mocked(listMcpTools).mockRejectedValue(new Error('invalid API key'));
 
     await expect(
       saveExaConnectionCommand(adminAuth, { apiKey: 'invalid-key' }),
@@ -265,23 +319,11 @@ describe('MCP connection lifecycle telemetry', () => {
       status: 'connected',
     });
 
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          jsonrpc: '2.0',
-          id: 1,
-          result: {
-            tools: [
-              { name: 'web_search_exa' },
-              { name: 'web_fetch_exa' },
-              { name: 'web_search_advanced_exa' },
-            ],
-          },
-        }),
-        { status: 200, headers: { 'content-type': 'application/json' } },
-      ),
-    );
-    vi.stubGlobal('fetch', fetchMock);
+    vi.mocked(listMcpTools).mockResolvedValue([
+      { name: 'web_search_exa' },
+      { name: 'web_fetch_exa' },
+      { name: 'web_search_advanced_exa' },
+    ]);
 
     await expect(
       listDeploymentMcpIntegrationToolsCommand(adminAuth, { mcpId: 'exa' }),
@@ -292,26 +334,13 @@ describe('MCP connection lifecycle telemetry', () => {
         { name: 'web_search_advanced_exa' },
       ],
     });
-    expect(fetchMock.mock.calls[0]?.[1]?.headers).not.toHaveProperty(
-      'x-api-key',
-    );
+    expect(
+      vi.mocked(listMcpTools).mock.calls[0]?.[0]?.headers,
+    ).not.toHaveProperty('x-api-key');
   });
 
   it('preserves an optional Exa key across disable and removes it without re-enabling', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockImplementation(
-        async () =>
-          new Response(
-            JSON.stringify({
-              jsonrpc: '2.0',
-              id: 1,
-              result: { tools: [{ name: 'agent_run' }] },
-            }),
-            { status: 200, headers: { 'content-type': 'application/json' } },
-          ),
-      ),
-    );
+    vi.mocked(listMcpTools).mockResolvedValue([{ name: 'agent_run' }]);
 
     await setDeploymentMcpEnabledCommand(adminAuth, {
       mcpId: 'exa',
