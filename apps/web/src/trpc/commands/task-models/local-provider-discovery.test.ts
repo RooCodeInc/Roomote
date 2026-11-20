@@ -310,13 +310,24 @@ describe('qualifyProviderModel', () => {
     'truncated',
     'invalid-arguments',
     'missing-call-id',
+    'fresh-unsaved',
+    'unsaved-override',
   ])(
     'qualifies Responses-only HTTP endpoints through streamed tool output continuation: %s',
-    async (outcome) => {
+    async (scenario) => {
+      const unsaved =
+        scenario === 'fresh-unsaved' || scenario === 'unsaved-override';
+      const outcome = unsaved ? 'completed' : scenario;
       vi.unstubAllGlobals();
-      mockGetPersistedEnvironmentVariableValues.mockResolvedValue({
-        OPENAI_COMPATIBLE_NATIVE_PROTOCOL: 'responses',
-      });
+      mockGetPersistedEnvironmentVariableValues.mockResolvedValue(
+        scenario === 'fresh-unsaved'
+          ? {}
+          : {
+              OPENAI_COMPATIBLE_NATIVE_PROTOCOL: unsaved
+                ? 'chat-completions'
+                : 'responses',
+            },
+      );
       const requests: Array<{
         url?: string;
         body: Record<string, unknown>;
@@ -390,6 +401,7 @@ describe('qualifyProviderModel', () => {
           throw new Error('No TCP address');
         const result = await qualifyProviderModel({
           provider: 'openai-compatible-native',
+          ...(unsaved ? { protocol: 'responses' as const } : {}),
           modelId: 'openai-compatible-native/custom/model',
           baseUrl: `http://127.0.0.1:${address.port}/prefix/v1`,
         });
