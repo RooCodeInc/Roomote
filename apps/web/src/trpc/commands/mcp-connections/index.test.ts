@@ -9,7 +9,10 @@ import {
 import {
   isMcpConnectionExaConfig,
   isMcpConnectionVoiceConfig,
+  getMcpIntegration,
 } from '@roomote/types';
+import { encrypt } from '@roomote/db/encryption';
+import { startStatefulMcpCatalog } from './stateful-mcp-catalog-fixture';
 
 const { captureEventMock } = vi.hoisted(() => ({
   captureEventMock: vi.fn(),
@@ -74,6 +77,65 @@ const testMcpIds = [
   'voice',
 ];
 
+// Stateless catalog mocks still implement the mandatory MCP handshake.
+function stubCatalogFetch(
+  list: (url: string, init?: RequestInit) => Promise<Response>,
+) {
+  vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+    const method = JSON.parse(String(init?.body)).method;
+    if (method === 'initialize')
+      return Response.json({
+        jsonrpc: '2.0',
+        id: 1,
+        result: { protocolVersion: '2025-06-18' },
+      });
+    if (method === 'notifications/initialized')
+      return new Response(null, { status: 202 });
+    const response = await list(url, init);
+    if (!response.ok) return response;
+    const payload = await response.clone().json();
+    return Response.json(
+      { ...payload, id: JSON.parse(String(init?.body)).id },
+      {
+        status: response.status,
+        headers: response.headers,
+      },
+    );
+  });
+}
+
+async function withJiraCatalog(
+  options: Parameters<typeof startStatefulMcpCatalog>[0],
+  check: (
+    endpoint: Awaited<ReturnType<typeof startStatefulMcpCatalog>>,
+  ) => Promise<void>,
+) {
+  const endpoint = await startStatefulMcpCatalog(options);
+  const integration = getMcpIntegration('jira')!;
+  const originalUrl = integration.url;
+  integration.url = endpoint.url;
+  try {
+    await connectMcpCommand(adminAuth, { mcpId: 'jira' });
+    await db
+      .update(mcpConnections)
+      .set({
+        accessToken: encrypt('catalog-test-token'),
+        tokenExpiresAt: new Date(Date.now() + 3_600_000),
+        enabled: true,
+        authStatus: 'authenticated',
+      })
+      .where(eq(mcpConnections.mcpId, 'jira'));
+    await setDeploymentMcpEnabledCommand(adminAuth, {
+      mcpId: 'jira',
+      enabled: true,
+    });
+    await check(endpoint);
+  } finally {
+    integration.url = originalUrl;
+    await endpoint.close();
+  }
+}
+
 async function cleanup() {
   await db
     .delete(mcpConnections)
@@ -98,6 +160,168 @@ describe('MCP connection lifecycle telemetry', () => {
   });
 
   afterAll(cleanup);
+
+  it('loads Jira tools through a stateful initialize/notification/paginated-list lifecycle', async () => {
+    await withJiraCatalog({}, async (endpoint) => {
+      await expect(
+        listDeploymentMcpIntegrationToolsCommand(adminAuth, { mcpId: 'jira' }),
+      ).resolves.toMatchObject({
+        tools: [
+          { name: 'getJiraIssue', readOnly: true, enabled: true },
+          { name: 'listJiraProjects', readOnly: true, enabled: true },
+        ],
+      });
+      expect(endpoint.requests.map((request) => request.method)).toEqual([
+        'initialize',
+        'notifications/initialized',
+        'tools/list',
+        'tools/list',
+        'DELETE',
+      ]);
+      expect(
+        endpoint.requests
+          .slice(1)
+          .every((request) => request.sessionId === 'catalog-1'),
+      ).toBe(true);
+      await listDeploymentMcpIntegrationToolsCommand(adminAuth, {
+        mcpId: 'jira',
+      });
+      expect(
+        endpoint.requests.filter((r) => r.method === 'initialize'),
+      ).toHaveLength(2);
+      expect(endpoint.requests.at(-1)).toMatchObject({
+        method: 'DELETE',
+        sessionId: 'catalog-2',
+      });
+    });
+  });
+
+  it.each([
+    { sse: true },
+    { sse: true, notificationBeforeResponse: true },
+    { stateless: true },
+    { deleteError: true },
+  ])(
+    'loads an initialized catalog with transport options %j',
+    async (options) => {
+      await withJiraCatalog(options, async (endpoint) => {
+        await expect(
+          listDeploymentMcpIntegrationToolsCommand(adminAuth, {
+            mcpId: 'jira',
+          }),
+        ).resolves.toMatchObject({
+          tools: [{ name: 'getJiraIssue' }, { name: 'listJiraProjects' }],
+        });
+        expect(endpoint.requests[0]?.method).toBe('initialize');
+        if ('stateless' in options)
+          expect(endpoint.requests.some((r) => r.method === 'DELETE')).toBe(
+            false,
+          );
+      });
+    },
+  );
+
+  it('restarts an expired session once and discards its partial catalog and cursor', async () => {
+    await withJiraCatalog({ expire: 'once' }, async (endpoint) => {
+      await expect(
+        listDeploymentMcpIntegrationToolsCommand(adminAuth, { mcpId: 'jira' }),
+      ).resolves.toMatchObject({
+        tools: [{ name: 'getJiraIssue' }, { name: 'listJiraProjects' }],
+      });
+      expect(
+        endpoint.requests.filter((r) => r.method === 'initialize'),
+      ).toHaveLength(2);
+      expect(
+        endpoint.requests
+          .filter(
+            (r) => r.method === 'tools/list' && r.sessionId === 'catalog-2',
+          )
+          .map((r) => r.cursor),
+      ).toEqual([undefined, 'next-page']);
+      expect(endpoint.requests.at(-1)).toMatchObject({
+        method: 'DELETE',
+        sessionId: 'catalog-2',
+      });
+    });
+  });
+
+  it.each([
+    {
+      options: {
+        sse: true,
+        notificationBeforeResponse: true,
+        initializeError: true,
+      },
+      error: 'Initialization refused',
+      initialized: 1,
+      closed: 0,
+    },
+    {
+      options: { sse: true, notificationBeforeResponse: true, listError: true },
+      error: 'Tool catalog unavailable',
+      initialized: 1,
+      closed: 1,
+    },
+    {
+      options: { expire: 'always' as const },
+      error: 'Session expired',
+      initialized: 2,
+      closed: 2,
+    },
+    {
+      options: { listError: true },
+      error: 'Tool catalog unavailable',
+      initialized: 1,
+      closed: 1,
+    },
+    {
+      options: { initializeError: true },
+      error: 'Initialization refused',
+      initialized: 1,
+      closed: 0,
+    },
+    {
+      options: { unauthorized: true },
+      error: 'needs to be reconnected',
+      initialized: 1,
+      closed: 0,
+    },
+    {
+      options: { unauthorizedOnList: true },
+      error: 'needs to be reconnected',
+      initialized: 1,
+      closed: 1,
+    },
+    {
+      options: { notificationError: true },
+      error: 'Notification refused',
+      initialized: 1,
+      closed: 1,
+    },
+    {
+      options: { listError: true, deleteError: true },
+      error: 'Tool catalog unavailable',
+      initialized: 1,
+      closed: 1,
+    },
+  ])(
+    'fails without looping and closes allocated sessions for $options',
+    async ({ options, error, initialized, closed }) => {
+      await withJiraCatalog(options, async (endpoint) => {
+        await expect(
+          listDeploymentMcpIntegrationToolsCommand(adminAuth, {
+            mcpId: 'jira',
+          }),
+        ).rejects.toThrow(error);
+        expect(
+          endpoint.requests.filter((r) => r.method === 'initialize'),
+        ).toHaveLength(initialized);
+        expect(
+          endpoint.requests.filter((r) => r.method === 'DELETE'),
+        ).toHaveLength(closed);
+      });
+    },
+  );
 
   it('clears a legacy Jira client registration when reconnecting for v2 consent', async () => {
     await connectMcpCommand(adminAuth, { mcpId: 'jira' });
@@ -134,24 +358,18 @@ describe('MCP connection lifecycle telemetry', () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
-        Response.json(
-          { result: { tools: [], nextCursor: 'page-2' } },
-          { headers: { 'mcp-session-id': 'catalog-session' } },
-        ),
+        Response.json({ result: { tools: [], nextCursor: 'page-2' } }),
       )
       .mockResolvedValueOnce(
         Response.json({ result: { tools: [{ name: 'web_search_exa' }] } }),
       );
-    vi.stubGlobal('fetch', fetchMock);
+    stubCatalogFetch(fetchMock);
     await expect(
       listDeploymentMcpIntegrationToolsCommand(adminAuth, { mcpId: 'exa' }),
     ).resolves.toMatchObject({ tools: [{ name: 'web_search_exa' }] });
     expect(JSON.parse(fetchMock.mock.calls[1]?.[1]?.body).params).toEqual({
       cursor: 'page-2',
     });
-    expect(fetchMock.mock.calls[1]?.[1]?.headers['mcp-session-id']).toBe(
-      'catalog-session',
-    );
   });
 
   it('rejects a repeated cursor rather than silently returning a partial catalog', async () => {
@@ -159,8 +377,7 @@ describe('MCP connection lifecycle telemetry', () => {
       mcpId: 'exa',
       enabled: true,
     });
-    vi.stubGlobal(
-      'fetch',
+    stubCatalogFetch(
       vi
         .fn()
         .mockImplementation(async () =>
@@ -185,7 +402,7 @@ describe('MCP connection lifecycle telemetry', () => {
         { status: 200, headers: { 'content-type': 'application/json' } },
       ),
     );
-    vi.stubGlobal('fetch', fetchMock);
+    stubCatalogFetch(fetchMock);
 
     await saveExaConnectionCommand(adminAuth, { apiKey: 'exa-secret' });
 
@@ -281,7 +498,7 @@ describe('MCP connection lifecycle telemetry', () => {
         { status: 200, headers: { 'content-type': 'application/json' } },
       ),
     );
-    vi.stubGlobal('fetch', fetchMock);
+    stubCatalogFetch(fetchMock);
 
     await expect(
       listDeploymentMcpIntegrationToolsCommand(adminAuth, { mcpId: 'exa' }),
@@ -298,8 +515,7 @@ describe('MCP connection lifecycle telemetry', () => {
   });
 
   it('preserves an optional Exa key across disable and removes it without re-enabling', async () => {
-    vi.stubGlobal(
-      'fetch',
+    stubCatalogFetch(
       vi.fn().mockImplementation(
         async () =>
           new Response(
