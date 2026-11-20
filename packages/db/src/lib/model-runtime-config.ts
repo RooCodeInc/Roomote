@@ -8,6 +8,7 @@ import {
   getDefaultTaskModelId,
   getEnabledTaskModels,
   getModelProviderEnvKeyCandidates,
+  getOpenAiCompatibleProviderInstance,
   getTaskModelCatalog,
   INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME,
   INFERENCE_GATEWAY_GITHUB_COPILOT_ENV_VAR_NAME,
@@ -672,6 +673,21 @@ async function resolveModelRuntimeEnv(
         : [];
     }),
   );
+
+  // Transport selection is non-secret configuration, not a gateway credential.
+  // Include switchable providers too, and do not let R_MODEL_ENV_KEYS suppress
+  // it: both direct helper runtimes and credential-withholding sandboxes need it.
+  for (const modelId of [...resolvedRoleModels, ...gatewaySwitchableModelIds]) {
+    const instance = getOpenAiCompatibleProviderInstance(
+      modelId?.split('/')[0] ?? '',
+    );
+    if (!instance) continue;
+    const name = instance.protocolEnvVarName;
+    const value =
+      normalizeConfiguredValue(runtimeEnv[name]) ??
+      normalizeConfiguredValue(persistedEnvVars[name]);
+    if (value) resolvedProviderKeyValues[name] = value;
+  }
 
   // ChatGPT subscription coverage: when a connected subscription exists and
   // any resolved role or gateway-switchable model uses the `openai/` prefix,

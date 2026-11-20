@@ -303,13 +303,158 @@ describe('qualifyProviderModel', () => {
     vi.unstubAllGlobals();
   });
 
+  it.each([
+    'completed',
+    'failed',
+    'incomplete',
+    'truncated',
+    'invalid-arguments',
+    'missing-call-id',
+    'fresh-unsaved',
+    'unsaved-override',
+  ])(
+    'qualifies Responses-only HTTP endpoints through streamed tool output continuation: %s',
+    async (scenario) => {
+      const unsaved =
+        scenario === 'fresh-unsaved' || scenario === 'unsaved-override';
+      const outcome = unsaved ? 'completed' : scenario;
+      vi.unstubAllGlobals();
+      mockGetPersistedEnvironmentVariableValues.mockResolvedValue(
+        scenario === 'fresh-unsaved'
+          ? {}
+          : {
+              OPENAI_COMPATIBLE_NATIVE_PROTOCOL: unsaved
+                ? 'chat-completions'
+                : 'responses',
+            },
+      );
+      const requests: Array<{
+        url?: string;
+        body: Record<string, unknown>;
+        authorization?: string;
+      }> = [];
+      const call = {
+        type: 'function_call',
+        id: 'fc_ping',
+        call_id: 'call_ping',
+        name: 'ping',
+        arguments: '{}',
+      };
+      const server = createServer((request, response) => {
+        let body = '';
+        request.on('data', (chunk) => {
+          body += chunk;
+        });
+        request.on('end', () => {
+          const payload = JSON.parse(body);
+          requests.push({
+            url: request.url,
+            body: payload,
+            authorization: request.headers.authorization,
+          });
+          if (request.url !== '/prefix/v1/responses') {
+            response.writeHead(404).end();
+            return;
+          }
+          response.writeHead(200, { 'content-type': 'text/event-stream' });
+          const continuation = payload.tool_choice === 'none';
+          const event = continuation
+            ? {
+                type: `response.${outcome}`,
+                response: {
+                  status: outcome,
+                  output: [
+                    {
+                      type: 'message',
+                      content: [{ type: 'output_text', text: 'pong' }],
+                    },
+                  ],
+                },
+              }
+            : {
+                type: 'response.completed',
+                response: {
+                  status: 'completed',
+                  output: [
+                    {
+                      ...call,
+                      ...(outcome === 'invalid-arguments'
+                        ? { arguments: 'not-json' }
+                        : {}),
+                      ...(outcome === 'missing-call-id'
+                        ? { call_id: undefined }
+                        : {}),
+                    },
+                  ],
+                },
+              };
+          const stream = `: keepalive\r\n\r\ndata: ${JSON.stringify(event)}\r\n\r\n`;
+          response.write(stream.slice(0, 37));
+          setImmediate(() => response.end(stream.slice(37)));
+        });
+      });
+      server.listen(0, '127.0.0.1');
+      await once(server, 'listening');
+      try {
+        const address = server.address();
+        if (!address || typeof address === 'string')
+          throw new Error('No TCP address');
+        const result = await qualifyProviderModel({
+          provider: 'openai-compatible-native',
+          ...(unsaved ? { protocol: 'responses' as const } : {}),
+          modelId: 'openai-compatible-native/custom/model',
+          baseUrl: `http://127.0.0.1:${address.port}/prefix/v1`,
+        });
+        expect(result.success).toBe(outcome === 'completed');
+        expect(requests[0]).toMatchObject({
+          url: '/prefix/v1/responses',
+          body: {
+            model: 'custom/model',
+            store: false,
+            stream: true,
+            tool_choice: 'required',
+          },
+        });
+        expect(
+          requests.every((request) => request.authorization === undefined),
+        ).toBe(true);
+        if (!['invalid-arguments', 'missing-call-id'].includes(outcome)) {
+          expect(requests).toHaveLength(2);
+          expect(requests[1]?.body).toMatchObject({
+            input: expect.arrayContaining([
+              call,
+              {
+                type: 'function_call_output',
+                call_id: 'call_ping',
+                output: 'pong',
+              },
+            ]),
+            tool_choice: 'none',
+          });
+        }
+      } finally {
+        server.closeAllConnections();
+        await new Promise<void>((resolve, reject) =>
+          server.close((error) => (error ? reject(error) : resolve())),
+        );
+      }
+    },
+  );
+
   it('qualifies a provider model with a streaming tool request', async () => {
-    fetchMock.mockResolvedValue(
+    fetchMock.mockResolvedValueOnce(
       new Response(
-        'data: {"choices":[{"delta":{"tool_calls":[{"function":{"name":"ping"}}]}}]}\n\n',
+        'data: {"choices":[{"delta":{"tool_calls":[{"id":"call_ping","function":{"name":"ping","arguments":"{}"}}]}}]}\n\n',
         {
           headers: { 'content-type': 'text/event-stream' },
         },
+      ),
+    );
+
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        'data: {"choices":[{"delta":{"content":"pong"},"finish_reason":"stop"}]}\n\n',
+        { headers: { 'content-type': 'text/event-stream' } },
       ),
     );
 
@@ -407,14 +552,20 @@ describe('qualifyProviderModel', () => {
         requestBody += chunk;
       });
       request.on('end', () => {
+        const parsed = JSON.parse(requestBody);
         requests.push({
           url: request.url,
           method: request.method,
           body: JSON.parse(requestBody),
         });
         response.writeHead(200, { 'content-type': 'text/event-stream' });
-        response.write(body.slice(0, 17));
-        setImmediate(() => response.end(body.slice(17)));
+        const stream = parsed.messages?.some(
+          (message: { role: string }) => message.role === 'tool',
+        )
+          ? 'data: {"choices":[{"delta":{"content":"pong"},"finish_reason":"stop"}]}\r\n\r\n'
+          : body;
+        response.write(stream.slice(0, 17));
+        setImmediate(() => response.end(stream.slice(17)));
       });
     });
     server.listen(0, '127.0.0.1');
@@ -433,7 +584,7 @@ describe('qualifyProviderModel', () => {
       await expect(qualify()).resolves.toMatchObject({ success: false });
       body = [
         ': keepalive\r\n\r\n',
-        'data: {"choices":[\r\ndata: {"index":0,"delta":{"tool_calls":[{"index":0,"function":{"name":"pi"}}]}}]}\r\n\r\n',
+        'data: {"choices":[\r\ndata: {"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_ping","function":{"name":"pi","arguments":"{}"}}]}}]}\r\n\r\n',
         'data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"name":"ng"}}]}}]}\r\n\r\n',
         'data: [DONE]\r\n\r\n',
       ].join('');
@@ -448,6 +599,15 @@ describe('qualifyProviderModel', () => {
           url: '/v1/chat/completions',
           method: 'POST',
           body: expect.objectContaining({ tool_choice: 'required' }),
+        },
+        {
+          url: '/v1/chat/completions',
+          method: 'POST',
+          body: expect.objectContaining({
+            messages: expect.arrayContaining([
+              { role: 'tool', tool_call_id: 'call_ping', content: 'pong' },
+            ]),
+          }),
         },
       ]);
     } finally {

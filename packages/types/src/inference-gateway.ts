@@ -543,7 +543,10 @@ export const INFERENCE_GATEWAY_PROVIDERS: readonly InferenceGatewayProvider[] =
       upstreamBaseUrlEnvVarName: 'OPENAI_COMPATIBLE_BASE_URL',
       authHeader: { name: 'authorization', scheme: 'bearer' },
       optionalApiKey: true,
-      allowedPaths: OPENAI_COMPATIBLE_INFERENCE_PATHS,
+      allowedPaths: [
+        ...OPENAI_COMPATIBLE_INFERENCE_PATHS,
+        ...OPENAI_RESPONSES_INFERENCE_PATHS,
+      ],
       openCodeBaseUrlSuffix: '/v1',
     },
     {
@@ -643,7 +646,10 @@ export function getInferenceGatewayProvider(
     upstreamBaseUrlEnvVarName: instance.baseUrlEnvVarName,
     authHeader: { name: 'authorization', scheme: 'bearer' },
     optionalApiKey: true,
-    allowedPaths: OPENAI_COMPATIBLE_INFERENCE_PATHS,
+    allowedPaths: [
+      ...OPENAI_COMPATIBLE_INFERENCE_PATHS,
+      ...OPENAI_RESPONSES_INFERENCE_PATHS,
+    ],
     openCodeBaseUrlSuffix: '/v1',
   };
 }

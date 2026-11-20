@@ -687,6 +687,10 @@ export async function saveTaskModelProviderCommand(
         for (const [name, value] of Object.entries(
           input.additionalEnvValues ?? {},
         )) {
+          if (name === 'OPENAI_COMPATIBLE_PROTOCOL') {
+            remappedAdditional[instance.protocolEnvVarName] = value;
+            continue;
+          }
           if (name === 'OPENAI_COMPATIBLE_API_KEY') {
             remappedAdditional[instance.apiKeyEnvVarName] = value;
             continue;

@@ -16,6 +16,7 @@ import {
   OPENAI_COMPATIBLE_PROVIDER_ID,
   getDefaultAdditionalEnvValues,
   getSetupModelProvider,
+  resolveOpenAiCompatibleProtocol,
   type SetupModelProviderId,
   type SetupModelStatus,
 } from '@roomote/types';
@@ -314,6 +315,11 @@ export function StepInferenceProvider({
         const result = await qualifyProviderModel.mutateAsync({
           provider,
           modelId: candidate.modelId,
+          ...(provider === OPENAI_COMPATIBLE_PROVIDER_ID && {
+            protocol: resolveOpenAiCompatibleProtocol(
+              additionalEnvValues.OPENAI_COMPATIBLE_PROTOCOL,
+            ),
+          }),
           baseUrl: connection.baseUrl,
           apiKey: connection.apiKey,
         });

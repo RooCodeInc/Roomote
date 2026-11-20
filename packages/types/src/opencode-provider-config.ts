@@ -4,6 +4,7 @@ import {
   isOpenAiCompatibleProviderId,
   listOpenAiCompatibleProviderInstancesFromEnvNames,
   OPENAI_COMPATIBLE_PROVIDER_ID,
+  resolveOpenAiCompatibleProtocol,
   type OpenAiCompatibleProviderInstance,
 } from './openai-compatible-providers';
 import { ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME } from './model-provider-config';
@@ -265,6 +266,12 @@ export function mergeOpenAiCompatibleProviderConfig(
     }
 
     const existingProvider = asRecord(merged[providerId]);
+    const instance = getOpenAiCompatibleProviderInstance(providerId);
+    const responses =
+      instance &&
+      resolveOpenAiCompatibleProtocol(
+        runtimeEnv[instance.protocolEnvVarName],
+      ) === 'responses';
     const existingOptions = asRecord(existingProvider.options);
     const existingModels = asRecord(existingProvider.models);
     const directApiKey = provider.apiKeyEnvVarName
@@ -288,12 +295,15 @@ export function mergeOpenAiCompatibleProviderConfig(
       ...merged,
       [providerId]: {
         ...existingProvider,
-        npm: '@ai-sdk/openai-compatible',
+        npm: responses ? '@ai-sdk/openai' : '@ai-sdk/openai-compatible',
         name: provider.name,
         options: {
           ...existingOptions,
           baseURL,
           ...apiKeyOptions,
+          // Native OpenAI otherwise reads OPENAI_API_KEY, even for an arbitrary
+          // custom endpoint. A keyless connection must never inherit that key.
+          ...(responses && !directApiKey ? { apiKey: 'not-needed' } : {}),
         },
         models: {
           ...existingModels,

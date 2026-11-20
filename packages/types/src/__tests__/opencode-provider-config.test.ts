@@ -6,6 +6,47 @@ import {
 } from '../opencode-provider-config';
 
 describe('mergeOpenAiCompatibleProviderConfig', () => {
+  it('routes mixed connections independently without changing model IDs or inheriting OpenAI credentials', () => {
+    const models = [
+      'openai-compatible/model',
+      'openai-compatible-native/custom/model',
+    ];
+    expect(
+      mergeOpenAiCompatibleProviderConfig(
+        {},
+        {
+          OPENAI_COMPATIBLE_NATIVE_PROTOCOL: 'responses',
+          OPENAI_COMPATIBLE_NATIVE_BASE_URL:
+            'https://gateway.example/prefix/v1',
+          OPENAI_API_KEY: 'must-not-inherit',
+        },
+        models,
+      ),
+    ).toMatchObject({
+      'openai-compatible': {
+        npm: '@ai-sdk/openai-compatible',
+        models: { model: { name: 'model' } },
+      },
+      'openai-compatible-native': {
+        npm: '@ai-sdk/openai',
+        options: {
+          baseURL: 'https://gateway.example/prefix/v1',
+          apiKey: 'not-needed',
+        },
+        models: { 'custom/model': { name: 'custom/model' } },
+      },
+    });
+  });
+
+  it('rejects an invalid protocol instead of silently changing transport', () => {
+    expect(() =>
+      mergeOpenAiCompatibleProviderConfig(
+        {},
+        { OPENAI_COMPATIBLE_PROTOCOL: 'invalid' },
+        ['openai-compatible/model'],
+      ),
+    ).toThrow('API protocol');
+  });
   it('materializes managed Roomote models as an isolated OpenAI-compatible provider', () => {
     expect(
       mergeOpenAiCompatibleProviderConfig(
