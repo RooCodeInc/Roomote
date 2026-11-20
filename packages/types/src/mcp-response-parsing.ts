@@ -25,7 +25,23 @@ function tryParseMcpJsonRpcPayload(value: string): unknown | null {
   }
 }
 
-function parseSseMcpJsonRpcPayload(bodyText: string): unknown | null {
+function matchesResponseId(
+  payload: unknown,
+  responseId: string | number,
+): boolean {
+  return (
+    payload !== null &&
+    typeof payload === 'object' &&
+    'id' in payload &&
+    payload.id === responseId &&
+    ('result' in payload || 'error' in payload)
+  );
+}
+
+function parseSseMcpJsonRpcPayload(
+  bodyText: string,
+  responseId?: string | number,
+): unknown | null {
   for (const chunk of bodyText.split(/\r?\n\r?\n/)) {
     const dataLines = chunk
       .split(/\r?\n/)
@@ -40,7 +56,10 @@ function parseSseMcpJsonRpcPayload(bodyText: string): unknown | null {
     }
 
     const payload = tryParseMcpJsonRpcPayload(dataLines.join('\n').trim());
-    if (payload) {
+    if (
+      payload &&
+      (responseId === undefined || matchesResponseId(payload, responseId))
+    ) {
       return payload;
     }
   }
@@ -51,6 +70,8 @@ function parseSseMcpJsonRpcPayload(bodyText: string): unknown | null {
 export function parseMcpJsonRpcPayload(
   bodyText: string,
   contentType: string | null,
+  /** When supplied, skip notifications/other responses and require this request's result or error. */
+  responseId?: string | number,
 ): unknown | null {
   const trimmedBody = bodyText.trim();
   if (trimmedBody.length === 0) {
@@ -63,8 +84,11 @@ export function parseMcpJsonRpcPayload(
     trimmedBody.startsWith('data:');
 
   if (looksLikeSse) {
-    return parseSseMcpJsonRpcPayload(trimmedBody);
+    return parseSseMcpJsonRpcPayload(trimmedBody, responseId);
   }
 
-  return tryParseMcpJsonRpcPayload(trimmedBody);
+  const payload = tryParseMcpJsonRpcPayload(trimmedBody);
+  return responseId === undefined || matchesResponseId(payload, responseId)
+    ? payload
+    : null;
 }

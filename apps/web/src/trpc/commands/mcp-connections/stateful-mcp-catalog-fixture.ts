@@ -4,6 +4,7 @@ export async function startStatefulMcpCatalog(
   options: {
     expire?: 'once' | 'always';
     sse?: boolean;
+    notificationBeforeResponse?: boolean;
     stateless?: boolean;
     initializeError?: boolean;
     listError?: boolean;
@@ -36,7 +37,12 @@ export async function startStatefulMcpCatalog(
       res.writeHead(status, {
         'content-type': options.sse ? 'text/event-stream' : 'application/json',
       });
-      res.end(options.sse ? `event: message\ndata: ${payload}\n\n` : payload);
+      const prefix = options.notificationBeforeResponse
+        ? `event: message\ndata: ${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/message', params: { level: 'info', data: 'Preparing response' } })}\n\nevent: message\ndata: ${JSON.stringify({ jsonrpc: '2.0', id: 'unrelated', result: { protocolVersion: 'wrong-version', tools: [] } })}\n\n`
+        : '';
+      res.end(
+        options.sse ? `${prefix}event: message\ndata: ${payload}\n\n` : payload,
+      );
     };
     if (
       options.unauthorized ||

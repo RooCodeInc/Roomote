@@ -299,10 +299,12 @@ async function fetchUpstreamMcpTools(input: {
   function extractUpstreamErrorMessage(
     bodyText: string,
     contentType: string | null,
+    responseId?: number,
   ): string | null {
     const payload = parseMcpJsonRpcPayload(
       bodyText,
       contentType,
+      responseId,
     ) as McpToolsListJsonRpcPayload | null;
     if (
       typeof payload?.error?.message === 'string' &&
@@ -357,10 +359,12 @@ async function fetchUpstreamMcpTools(input: {
     response: Response;
     responseBody: string;
     action: 'load tools' | 'initialize' | 'initialize MCP session';
+    responseId?: number;
   }): Error {
     const upstreamMessage = extractUpstreamErrorMessage(
       args.responseBody,
       args.response.headers.get('content-type'),
+      args.responseId,
     );
 
     if (
@@ -467,6 +471,7 @@ async function fetchUpstreamMcpTools(input: {
         response: initializeResponse,
         responseBody: initializeResponseBody,
         action: 'initialize',
+        responseId: 1,
       });
     }
 
@@ -477,12 +482,14 @@ async function fetchUpstreamMcpTools(input: {
     const initialized = parseMcpJsonRpcPayload(
       initializeResponseBody,
       initializeResponse.headers.get('content-type'),
+      1,
     ) as { error?: unknown; result?: { protocolVersion?: unknown } } | null;
     if (initialized?.error) {
       throw buildUpstreamToolLoadError({
         response: initializeResponse,
         responseBody: initializeResponseBody,
         action: 'initialize',
+        responseId: 1,
       });
     }
     if (typeof initialized?.result?.protocolVersion !== 'string') {
@@ -521,10 +528,11 @@ async function fetchUpstreamMcpTools(input: {
     // server does not allocate a session. Do not infer it from error wording.
     await initializeSession();
     while (true) {
+      const currentRequestId = requestId++;
       const response = await postJsonRpc(
         {
           jsonrpc: '2.0',
-          id: requestId++,
+          id: currentRequestId,
           method: 'tools/list',
           ...(cursor ? { params: { cursor } } : {}),
         },
@@ -551,12 +559,14 @@ async function fetchUpstreamMcpTools(input: {
           response,
           responseBody,
           action: 'load tools',
+          responseId: currentRequestId,
         });
       }
 
       const payload = parseMcpJsonRpcPayload(
         responseBody,
         response.headers.get('content-type'),
+        currentRequestId,
       ) as McpToolsListJsonRpcPayload | null;
 
       if (!payload) {

@@ -91,7 +91,16 @@ function stubCatalogFetch(
       });
     if (method === 'notifications/initialized')
       return new Response(null, { status: 202 });
-    return list(url, init);
+    const response = await list(url, init);
+    if (!response.ok) return response;
+    const payload = await response.clone().json();
+    return Response.json(
+      { ...payload, id: JSON.parse(String(init?.body)).id },
+      {
+        status: response.status,
+        headers: response.headers,
+      },
+    );
   });
 }
 
@@ -187,7 +196,12 @@ describe('MCP connection lifecycle telemetry', () => {
     });
   });
 
-  it.each([{ sse: true }, { stateless: true }, { deleteError: true }])(
+  it.each([
+    { sse: true },
+    { sse: true, notificationBeforeResponse: true },
+    { stateless: true },
+    { deleteError: true },
+  ])(
     'loads an initialized catalog with transport options %j',
     async (options) => {
       await withJiraCatalog(options, async (endpoint) => {
@@ -232,6 +246,22 @@ describe('MCP connection lifecycle telemetry', () => {
   });
 
   it.each([
+    {
+      options: {
+        sse: true,
+        notificationBeforeResponse: true,
+        initializeError: true,
+      },
+      error: 'Initialization refused',
+      initialized: 1,
+      closed: 0,
+    },
+    {
+      options: { sse: true, notificationBeforeResponse: true, listError: true },
+      error: 'Tool catalog unavailable',
+      initialized: 1,
+      closed: 1,
+    },
     {
       options: { expire: 'always' as const },
       error: 'Session expired',
