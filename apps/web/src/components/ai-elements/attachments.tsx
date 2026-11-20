@@ -128,6 +128,7 @@ export const Attachments = ({
         className={cn(
           'flex items-start',
           variant === 'list' ? 'flex-col gap-2' : 'flex-wrap gap-2',
+          variant === 'inline' && 'min-w-0 max-w-full',
           variant === 'grid' && 'ml-auto w-full',
           className,
         )}
@@ -338,6 +339,7 @@ export const AttachmentRemove = ({
         ],
         variant === 'inline' && [
           'ml-1 size-6 shrink-0 rounded p-0',
+          '[@media(hover:none)]:opacity-100',
           'group-focus-within:opacity-100',
           '[&>svg]:size-3',
         ],
