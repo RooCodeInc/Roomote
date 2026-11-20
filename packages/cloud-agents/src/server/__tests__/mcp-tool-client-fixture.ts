@@ -1,4 +1,4 @@
-import { createServer } from 'node:http';
+import { createServer, type IncomingHttpHeaders } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -16,7 +16,9 @@ export async function startMcpToolTestServer(
   call: (request: CallToolRequest) => CallToolResult,
   options: {
     httpFailure?: boolean;
-    listTools?: (request: ListToolsRequest) => ListToolsResult;
+    listTools?: (
+      request: ListToolsRequest,
+    ) => ListToolsResult | Promise<ListToolsResult>;
   } = {},
 ) {
   const mcp = new Server(
@@ -40,7 +42,12 @@ export async function startMcpToolTestServer(
     enableJsonResponse: true,
   });
   await mcp.connect(transport);
+  const requests: Array<{
+    method: string | undefined;
+    headers: IncomingHttpHeaders;
+  }> = [];
   const server = createServer(async (request, response) => {
+    requests.push({ method: request.method, headers: request.headers });
     if (options.httpFailure) {
       response.writeHead(503).end('Service unavailable (503)');
       return;
@@ -54,6 +61,7 @@ export async function startMcpToolTestServer(
   }
   return {
     url: `http://127.0.0.1:${address.port}/mcp`,
+    requests,
     async close() {
       await mcp.close();
       await new Promise<void>((resolve, reject) => {
