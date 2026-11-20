@@ -268,6 +268,24 @@ export async function handlePrSynchronize({
             };
           } else {
             reconciliation = result.kind;
+            if (
+              result.kind === 'pending_updated' &&
+              currentTarget.settings?.publishGithubCheck
+            ) {
+              // Checks are bound to a commit. Replace the old association after
+              // retargeting; the publisher also reconciles a worker that starts
+              // or finishes before the replacement check is persisted.
+              releaseLaunchLock.signal.throwIfAborted();
+              await publishGithubPrReviewCheck({
+                installationId: installation!.id,
+                repository: repository.full_name,
+                prNumber: pr.number,
+                headSha,
+                taskId: activeReviewRun.taskId,
+                runId: activeReviewRun.id,
+                signal: releaseLaunchLock.signal,
+              });
+            }
           }
         }
 
