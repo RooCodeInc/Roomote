@@ -207,6 +207,7 @@ describe('handlePrSynchronize', () => {
     });
     expect(mockEnqueueTask).not.toHaveBeenCalled();
     expect(mockEnqueueActivePrReviewFollowUp).not.toHaveBeenCalled();
+    expect(mockPublishGithubPrReviewCheck).not.toHaveBeenCalled();
     expect(mockReleaseLock).toHaveBeenCalledOnce();
   });
 

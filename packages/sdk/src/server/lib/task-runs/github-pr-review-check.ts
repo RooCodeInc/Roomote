@@ -792,21 +792,49 @@ export async function markGithubPrReviewCheckInProgress(input: {
   runId: number;
   gitHubToken: string;
 }): Promise<void> {
+  let releaseLifecycleLock:
+    | Awaited<ReturnType<typeof acquireGithubPrReviewLifecycleLock>>
+    | undefined;
+
   try {
-    const linkage = await findGithubPrLinkage(input);
-    if (!linkage?.githubCheckRunId || !linkage.repository) {
+    // The first read only determines lock scope. A publisher can replace the
+    // check while startup waits, including for the very same run.
+    const scope = await findGithubPrLinkage(input);
+    if (!scope?.repository || !scope.prNumber) {
       return;
     }
 
-    const repository = splitRepository(linkage.repository);
+    const repository = splitRepository(scope.repository);
     if (!repository) {
       return;
     }
 
+    releaseLifecycleLock = await acquireGithubPrReviewLifecycleLock(
+      scope.repository,
+      scope.prNumber,
+    );
+    if (!releaseLifecycleLock) {
+      console.warn(
+        `[githubPrReviewCheck] Could not acquire lifecycle lock to start check for task ${input.taskId}`,
+      );
+      return;
+    }
+
+    const signal = releaseLifecycleLock.signal;
+    signal.throwIfAborted();
+    const linkage = await findGithubPrLinkage({
+      taskId: input.taskId,
+      repository: scope.repository,
+      prNumber: scope.prNumber,
+    });
+    if (!linkage?.githubCheckRunId) return;
+
     const taskUrl = getReviewTaskUrl(input.taskId);
+    signal.throwIfAborted();
     const { data: checkRun } = await getCheckRun(input.gitHubToken, {
       ...repository,
       check_run_id: linkage.githubCheckRunId,
+      request: { signal },
     });
     const owningRunId = Number(
       /^roomote-review:(\d+)$/.exec(checkRun.external_id ?? '')?.[1],
@@ -815,6 +843,7 @@ export async function markGithubPrReviewCheckInProgress(input: {
       return;
     }
 
+    signal.throwIfAborted();
     await updateCheckRun(input.gitHubToken, {
       ...repository,
       check_run_id: linkage.githubCheckRunId,
@@ -825,6 +854,7 @@ export async function markGithubPrReviewCheckInProgress(input: {
         title: 'Roomote review in progress',
         summary: `Roomote is reviewing this commit. [Open the task](${taskUrl}).`,
       },
+      request: { signal },
     });
   } catch (error) {
     console.error(
@@ -832,6 +862,8 @@ export async function markGithubPrReviewCheckInProgress(input: {
         error instanceof Error ? error.message : String(error)
       }`,
     );
+  } finally {
+    await releaseLifecycleLock?.();
   }
 }
 
