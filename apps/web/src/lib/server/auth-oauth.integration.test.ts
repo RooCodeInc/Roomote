@@ -503,9 +503,16 @@ it.each(['slack', 'gitlab', 'microsoft-entra-id'])(
   },
 );
 
-it.each(['false', '0', 'unverified'])(
-  'rejects implicit Slack email linking for the string claim %s',
-  async (claim) => {
+it.each([
+  { claim: 'false', links: false },
+  { claim: '0', links: false },
+  { claim: 'unverified', links: false },
+  { claim: false, links: false },
+  { claim: true, links: true },
+  { claim: 'true', links: true },
+])(
+  'parses Slack verification claim $claim when linking to a verified local account (links=$links)',
+  async ({ claim, links }) => {
     slackEmailVerified = claim;
     const signup = await request('sign-up/email', {
       email: `${subject}@example.test`,
@@ -515,16 +522,30 @@ it.each(['false', '0', 'unverified'])(
     expect(signup.status).toBe(200);
     const userId = (await signup.json()).user.id as string;
     userIds.push(userId);
+    // Isolate provider-claim parsing from the independent local-email guard.
+    await db
+      .update(authUsers)
+      .set({ emailVerified: true })
+      .where(eq(authUsers.id, userId));
+    expect(
+      await db.query.authUsers.findFirst({ where: eq(authUsers.id, userId) }),
+    ).toMatchObject({ emailVerified: true });
     const response = await finish('slack', await start('slack'));
+    const session = await (
+      await request('get-session', undefined, cookies(response))
+    ).json();
+    const linkedAccount = await db.query.authAccounts.findFirst({
+      where: eq(authAccounts.accountId, subject),
+    });
+    if (links) {
+      expect(response.headers.get('location')).toBe('/settings/personal');
+      expect(session?.user.id).toBe(userId);
+      expect(linkedAccount).toMatchObject({ userId, providerId: 'slack' });
+      return;
+    }
     expect(response.headers.get('location')).toContain('error=');
-    expect(
-      await (await request('get-session', undefined, cookies(response))).json(),
-    ).toBeNull();
-    expect(
-      await db.query.authAccounts.findFirst({
-        where: eq(authAccounts.accountId, subject),
-      }),
-    ).toBeUndefined();
+    expect(session).toBeNull();
+    expect(linkedAccount).toBeUndefined();
   },
 );
 
