@@ -94,6 +94,8 @@ describe('OPENCODE_CHATGPT_GATEWAY_PLUGIN_SCRIPT', () => {
         'gpt-6-astra': createModel('gpt-6-astra'),
         'gpt-6-sol': createModel('gpt-6-sol'),
         'gpt-6.1-sol': createModel('gpt-6.1-sol'),
+        'gpt-6.2-sol': createModel('gpt-6.2-sol'),
+        'gpt-6.2-astra': createModel('gpt-6.2-astra'),
         'gpt-6.1-terra': {
           ...createModel('gpt-6.1-terra'),
           limit: { context: 1_050_000, input: 922_000, output: 128_000 },
@@ -114,6 +116,8 @@ describe('OPENCODE_CHATGPT_GATEWAY_PLUGIN_SCRIPT', () => {
       'gpt-6-astra',
       'gpt-6-sol',
       'gpt-6.1-sol',
+      'gpt-6.2-sol',
+      'gpt-6.2-astra',
       'gpt-6.1-terra',
       'gpt-6-luna',
       'gpt-5.6-luna',
