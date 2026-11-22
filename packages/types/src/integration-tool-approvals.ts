@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { getIntegrationMcpToolAliases } from './mcp-tool-policy';
 
 import {
   extractVisibleAcpPromptText,
@@ -320,6 +321,30 @@ type IntegrationToolPolicyEntry = Pick<
   IntegrationToolPolicyMetadata,
   'integrationId' | 'toolName' | 'mode'
 >;
+
+/** Resolve legacy/current names conservatively until an explicit edit updates the whole group. */
+export function expandRenamedIntegrationToolPolicies<
+  T extends IntegrationToolPolicyEntry,
+>(policies: readonly T[]): T[] {
+  const expanded = new Map<string, T>();
+  for (const policy of policies) {
+    for (const toolName of getIntegrationMcpToolAliases(
+      policy.integrationId,
+      policy.toolName,
+    )) {
+      const key = integrationToolPolicyKey(policy.integrationId, toolName);
+      const previous = expanded.get(key);
+      if (
+        !previous ||
+        INTEGRATION_TOOL_POLICY_MODE_STRICTNESS[policy.mode] >
+          INTEGRATION_TOOL_POLICY_MODE_STRICTNESS[previous.mode]
+      ) {
+        expanded.set(key, { ...policy, toolName });
+      }
+    }
+  }
+  return [...expanded.values()];
+}
 
 /**
  * The one rule for combining policy layers, shared by every enforcement

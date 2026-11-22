@@ -7,6 +7,28 @@
  */
 
 import { parseMcpToolResult } from '@roomote/types';
+import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js';
+import { StreamableHTTPError } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+
+/** Classify protocol/transport auth failures without exposing upstream text. */
+export function isMcpAuthenticationError(error: unknown): boolean {
+  const seen = new Set<unknown>();
+  let cause = error;
+  while (cause instanceof Error && !seen.has(cause)) {
+    seen.add(cause);
+    const message = cause.message.toLowerCase();
+    if (
+      cause instanceof UnauthorizedError ||
+      (cause instanceof StreamableHTTPError && cause.code === 401) ||
+      message.includes('invalid_token') ||
+      message.includes('invalid access token') ||
+      message.includes('expired access token')
+    )
+      return true;
+    cause = cause.cause;
+  }
+  return false;
+}
 
 export class McpToolCallError extends Error {
   readonly upstreamText!: string | null;
@@ -56,7 +78,30 @@ export type McpToolDefinition = {
   name: string;
   description?: string;
   inputSchema?: unknown;
+  annotations?: Record<string, unknown>;
 };
+
+async function listAllToolDefinitions(
+  client: Awaited<ReturnType<typeof createCancellableMcpClient>>,
+  signal?: AbortSignal,
+) {
+  const definitions = await client.listTools({ options: { signal } });
+  const seenCursors = new Set<string>();
+  let cursor = definitions.nextCursor;
+  while (cursor) {
+    if (seenCursors.has(cursor) || seenCursors.size >= 100) {
+      throw new Error('MCP tool catalog pagination did not terminate.');
+    }
+    seenCursors.add(cursor);
+    const page = await client.listTools({
+      params: { cursor },
+      options: { signal },
+    });
+    definitions.tools.push(...page.tools);
+    cursor = page.nextCursor;
+  }
+  return { ...definitions, nextCursor: undefined };
+}
 
 /** List the tools exposed by a streamable-http MCP server. */
 export async function listMcpTools(options: {
@@ -67,9 +112,7 @@ export async function listMcpTools(options: {
   const client = await createCancellableMcpClient(options);
 
   try {
-    const definitions = await client.listTools({
-      options: { signal: options.signal },
-    });
+    const definitions = await listAllToolDefinitions(client, options.signal);
     return definitions.tools.map((definition) => ({
       name: definition.name,
       ...(definition.description
@@ -77,6 +120,9 @@ export async function listMcpTools(options: {
         : {}),
       ...(definition.inputSchema
         ? { inputSchema: definition.inputSchema }
+        : {}),
+      ...(definition.annotations
+        ? { annotations: definition.annotations }
         : {}),
     }));
   } finally {
@@ -111,9 +157,7 @@ export async function callMcpTool(options: {
   const client = await createCancellableMcpClient(options);
 
   try {
-    const definitions = await client.listTools({
-      options: { signal: options.signal },
-    });
+    const definitions = await listAllToolDefinitions(client, options.signal);
     const toolDefinition = definitions.tools.find(
       (tool) => tool.name === options.toolName,
     );

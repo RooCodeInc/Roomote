@@ -14,6 +14,7 @@ import {
   DEFAULT_OPENAI_REALTIME_VOICE_ID,
   getDefaultMcpConnectionRole,
   getAllowedIntegrationMcpToolNames,
+  getIntegrationMcpDisabledToolNames,
   getMcpIntegration,
   getMcpIntegrationConnectionMode,
   getMcpIntegrationConnectionScope,
@@ -39,10 +40,13 @@ import {
   normalizeGrafanaBaseUrl,
   type McpIntegration,
   type EffectiveMcpIntegration,
-  type McpToolsListJsonRpcPayload,
-  parseMcpJsonRpcPayload,
   readMcpToolReadOnlyHint,
 } from '@roomote/types';
+import {
+  isMcpAuthenticationError,
+  listMcpTools,
+  type McpToolDefinition,
+} from '@roomote/cloud-agents/server';
 import { decrypt, encrypt } from '@roomote/db/encryption';
 import { getValidAccessToken } from '@roomote/sdk/server';
 import { validateRipplingConnection } from '@roomote/sdk/server/rippling-api';
@@ -119,7 +123,6 @@ function getMcpIntegrationIds(): string[] {
   return MCP_INTEGRATIONS.map((integration) => integration.id);
 }
 
-const MCP_PROTOCOL_VERSION = '2025-06-18';
 const MCP_TOOL_CATALOG_TIMEOUT_MS = 10_000;
 
 type ListedMcpTool = {
@@ -293,276 +296,20 @@ async function fetchUpstreamMcpTools(input: {
 
   const reconnectMessage = `${resolvedIntegration.name} needs to be reconnected before tools can be managed.`;
 
-  function isTimeoutError(error: unknown): boolean {
-    return (
-      (error instanceof DOMException &&
-        (error.name === 'TimeoutError' || error.name === 'AbortError')) ||
-      (error instanceof Error &&
-        error.message.includes('The operation was aborted due to timeout'))
-    );
-  }
-
-  function extractUpstreamErrorMessage(
-    bodyText: string,
-    contentType: string | null,
-  ): string | null {
-    const payload = parseMcpJsonRpcPayload(
-      bodyText,
-      contentType,
-    ) as McpToolsListJsonRpcPayload | null;
-    if (
-      typeof payload?.error?.message === 'string' &&
-      payload.error.message.trim().length > 0
-    ) {
-      return payload.error.message.trim();
-    }
-
-    try {
-      const parsed = JSON.parse(bodyText) as Record<string, unknown>;
-      const candidates = [
-        parsed.error_description,
-        parsed.error,
-        parsed.message,
-        parsed.detail,
-      ];
-
-      for (const candidate of candidates) {
-        if (typeof candidate === 'string' && candidate.trim().length > 0) {
-          return candidate.trim();
-        }
-      }
-    } catch {
-      // Ignore non-JSON bodies and fall back to the raw body text.
-    }
-
-    const trimmedBody = bodyText.trim();
-    return trimmedBody.length > 0 ? trimmedBody : null;
-  }
-
-  function shouldReconnectFromUpstreamError(
-    responseStatus: number | null,
-    upstreamMessage: string | null,
-  ): boolean {
-    if (responseStatus === 401) {
-      return true;
-    }
-
-    if (!upstreamMessage) {
-      return false;
-    }
-
-    const normalizedMessage = upstreamMessage.toLowerCase();
-    return (
-      normalizedMessage.includes('invalid_token') ||
-      normalizedMessage.includes('invalid access token') ||
-      normalizedMessage.includes('expired access token')
-    );
-  }
-
-  function buildUpstreamToolLoadError(args: {
-    response: Response;
-    responseBody: string;
-    action: 'load tools' | 'initialize' | 'initialize MCP session';
-  }): Error {
-    const upstreamMessage = extractUpstreamErrorMessage(
-      args.responseBody,
-      args.response.headers.get('content-type'),
-    );
-
-    if (
-      shouldReconnectFromUpstreamError(args.response.status, upstreamMessage)
-    ) {
-      return new Error(reconnectMessage);
-    }
-
-    if (upstreamMessage) {
-      if (args.action === 'load tools') {
-        return new Error(
-          `Failed to load tools from ${resolvedIntegration.name}: ${upstreamMessage}`,
-        );
-      }
-
-      if (args.action === 'initialize') {
-        return new Error(
-          `Failed to initialize ${resolvedIntegration.name} before loading tools: ${upstreamMessage}`,
-        );
-      }
-
-      return new Error(
-        `Failed to initialize MCP session with ${resolvedIntegration.name}: ${upstreamMessage}`,
-      );
-    }
-
-    if (args.action === 'load tools') {
-      return new Error(
-        `Failed to load tools from ${resolvedIntegration.name} (${args.response.status} ${args.response.statusText})`,
-      );
-    }
-
-    if (args.action === 'initialize') {
-      return new Error(
-        `Failed to initialize ${resolvedIntegration.name} before loading tools (${args.response.status} ${args.response.statusText})`,
-      );
-    }
-
-    return new Error(
-      `Failed to initialize MCP session with ${resolvedIntegration.name} (${args.response.status} ${args.response.statusText})`,
-    );
-  }
-
-  const postJsonRpc = async (
-    body: Record<string, unknown>,
-    extraHeaders: Record<string, string> = {},
-  ) =>
-    fetch(auth.upstreamUrl ?? integrationUrl, {
-      method: 'POST',
-      headers: {
-        accept: 'application/json, text/event-stream',
-        'content-type': 'application/json',
-        ...auth.headers,
-        ...extraHeaders,
-      },
-      body: JSON.stringify(body),
+  let tools: McpToolDefinition[];
+  try {
+    tools = await listMcpTools({
+      url: auth.upstreamUrl ?? integrationUrl,
+      headers: auth.headers,
       signal: AbortSignal.timeout(MCP_TOOL_CATALOG_TIMEOUT_MS),
     });
-
-  async function listToolsWithInitializedSession(): Promise<{
-    response: Response;
-    responseBody: string;
-  }> {
-    const initializeResponse = await postJsonRpc(
-      {
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'initialize',
-        params: {
-          protocolVersion: MCP_PROTOCOL_VERSION,
-          capabilities: {},
-          clientInfo: {
-            name: 'roomote-admin',
-            version: '0.0.0',
-          },
-        },
-      },
-      {
-        'mcp-protocol-version': MCP_PROTOCOL_VERSION,
-      },
-    );
-
-    const initializeResponseBody = await initializeResponse.text();
-
-    if (!initializeResponse.ok) {
-      throw buildUpstreamToolLoadError({
-        response: initializeResponse,
-        responseBody: initializeResponseBody,
-        action: 'initialize',
-      });
-    }
-
-    const sessionHeaders: Record<string, string> = {
-      'mcp-protocol-version': MCP_PROTOCOL_VERSION,
-    };
-    const sessionId = initializeResponse.headers.get('mcp-session-id');
-    if (sessionId) {
-      sessionHeaders['mcp-session-id'] = sessionId;
-    }
-
-    const initializedResponse = await postJsonRpc(
-      {
-        jsonrpc: '2.0',
-        method: 'notifications/initialized',
-      },
-      sessionHeaders,
-    );
-
-    const initializedResponseBody = await initializedResponse.text();
-
-    if (!initializedResponse.ok) {
-      throw buildUpstreamToolLoadError({
-        response: initializedResponse,
-        responseBody: initializedResponseBody,
-        action: 'initialize MCP session',
-      });
-    }
-
-    const response = await postJsonRpc(
-      {
-        jsonrpc: '2.0',
-        id: 2,
-        method: 'tools/list',
-      },
-      sessionHeaders,
-    );
-    const responseBody = await response.text();
-    return { response, responseBody };
-  }
-
-  let response: Response;
-  let responseBody: string;
-
-  try {
-    response = await postJsonRpc({
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'tools/list',
-    });
-    responseBody = await response.text();
   } catch (error) {
-    if (!isTimeoutError(error)) {
-      throw error;
-    }
-
-    ({ response, responseBody } = await listToolsWithInitializedSession());
-  }
-
-  if (
-    !response.ok &&
-    response.status === 400 &&
-    responseBody.includes('Mcp-Session-Id')
-  ) {
-    ({ response, responseBody } = await listToolsWithInitializedSession());
-  }
-
-  if (!response.ok) {
-    throw buildUpstreamToolLoadError({
-      response,
-      responseBody,
-      action: 'load tools',
-    });
-  }
-
-  const payload = parseMcpJsonRpcPayload(
-    responseBody,
-    response.headers.get('content-type'),
-  ) as McpToolsListJsonRpcPayload | null;
-
-  if (!payload) {
+    if (isMcpAuthenticationError(error)) throw new Error(reconnectMessage);
+    // Upstream messages can contain credentials; do not expose them in the UI.
     throw new Error(
-      `Failed to load tools from ${resolvedIntegration.name}: upstream tools/list returned an invalid payload.`,
+      `Failed to load tools from ${resolvedIntegration.name}. Please try again.`,
     );
   }
-
-  if (payload.error) {
-    const upstreamMessage =
-      typeof payload.error.message === 'string' &&
-      payload.error.message.trim().length > 0
-        ? payload.error.message.trim()
-        : 'upstream MCP server returned a JSON-RPC error';
-    if (shouldReconnectFromUpstreamError(null, upstreamMessage)) {
-      throw new Error(reconnectMessage);
-    }
-    throw new Error(
-      `Failed to load tools from ${resolvedIntegration.name}: ${upstreamMessage}`,
-    );
-  }
-
-  if (!Array.isArray(payload.result?.tools)) {
-    throw new Error(
-      `Failed to load tools from ${resolvedIntegration.name}: upstream tools/list returned an invalid payload.`,
-    );
-  }
-
-  const tools = payload.result.tools;
   const toolDefinitions = tools.flatMap((tool) =>
     typeof tool.name === 'string'
       ? [
@@ -580,11 +327,15 @@ async function fetchUpstreamMcpTools(input: {
   const visibleTools = filterMcpToolDefinitions(toolDefinitions, {
     allowedToolNames,
   });
+  const disabledToolNames = getIntegrationMcpDisabledToolNames(
+    resolvedIntegration,
+    input.disabledTools,
+  );
 
   return visibleTools.map((tool) => ({
     ...tool,
     enabled: isMcpToolAllowed(tool.name, {
-      disabledToolNames: input.disabledTools,
+      disabledToolNames,
     }),
   }));
 }

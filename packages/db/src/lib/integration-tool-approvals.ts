@@ -22,7 +22,11 @@ import type {
   IntegrationToolSessionOverrideMetadata,
   IntegrationToolSessionOverrideMode,
 } from '@roomote/types';
-import { redactIntegrationToolArgs } from '@roomote/types';
+import {
+  redactIntegrationToolArgs,
+  expandRenamedIntegrationToolPolicies,
+  getIntegrationMcpToolAliases,
+} from '@roomote/types';
 
 import { db, type DatabaseOrTransaction } from '../db';
 import {
@@ -153,7 +157,7 @@ async function listPolicies(
     .from(table as typeof integrationToolPolicies)
     .where(store.owns)
     .orderBy(table.integrationId, table.toolName);
-  return rows.map(policyMetadata);
+  return expandRenamedIntegrationToolPolicies(rows.map(policyMetadata));
 }
 
 async function upsertPolicy(
@@ -164,6 +168,11 @@ async function upsertPolicy(
     mode: IntegrationToolPolicyMode;
   },
 ): Promise<void> {
+  if (
+    getIntegrationMcpToolAliases(input.integrationId, input.toolName).length > 1
+  ) {
+    return upsertPolicies(store, { ...input, toolNames: [input.toolName] });
+  }
   // Both tables have every column this writes; the store supplies the rest.
   const table = store.table as typeof integrationToolPolicies;
   // The default has no row; every stored choice, Always allow included, is a
@@ -204,7 +213,13 @@ async function upsertPolicies(
     mode: IntegrationToolPolicyMode;
   },
 ): Promise<void> {
-  const toolNames = [...new Set(input.toolNames)];
+  const toolNames = [
+    ...new Set(
+      input.toolNames.flatMap((name) => [
+        ...getIntegrationMcpToolAliases(input.integrationId, name),
+      ]),
+    ),
+  ];
   if (toolNames.length === 0) return;
 
   const table = store.table as typeof integrationToolPolicies;
@@ -502,7 +517,12 @@ export async function hasRejectedIntegrationToolInSession(context: {
           integrationToolApprovalRequests.integrationId,
           context.integrationId,
         ),
-        eq(integrationToolApprovalRequests.toolName, context.toolName),
+        inArray(integrationToolApprovalRequests.toolName, [
+          ...getIntegrationMcpToolAliases(
+            context.integrationId,
+            context.toolName,
+          ),
+        ]),
         eq(integrationToolApprovalRequests.status, 'rejected'),
       ),
     )
@@ -528,9 +548,15 @@ async function lockToolRejections(
   tx: DatabaseOrTransaction,
   tool: { sessionId: string; integrationId: string; toolName: string },
 ): Promise<void> {
-  await tx.execute(
-    sql`select pg_advisory_xact_lock(hashtextextended(${`integration-tool-rejection:${tool.sessionId}:${tool.integrationId}:${tool.toolName}`}, 0))`,
-  );
+  // Keep the existing lock keys for rolling upgrades, in a stable order so
+  // calls under either provider name serialize without deadlocking.
+  for (const toolName of [
+    ...getIntegrationMcpToolAliases(tool.integrationId, tool.toolName),
+  ].sort()) {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtextextended(${`integration-tool-rejection:${tool.sessionId}:${tool.integrationId}:${toolName}`}, 0))`,
+    );
+  }
 }
 
 /**
@@ -691,7 +717,15 @@ async function upsertSessionOverride(
 ): Promise<void> {
   await tx
     .insert(integrationToolSessionOverrides)
-    .values({ ...input, updatedAt: sql`clock_timestamp()` })
+    .values(
+      getIntegrationMcpToolAliases(input.integrationId, input.toolName).map(
+        (toolName) => ({
+          ...input,
+          toolName,
+          updatedAt: sql`clock_timestamp()`,
+        }),
+      ),
+    )
     .onConflictDoUpdate({
       target: [
         integrationToolSessionOverrides.sessionId,
@@ -722,11 +756,13 @@ export async function listIntegrationToolSessionOverrides(
       integrationToolSessionOverrides.integrationId,
       integrationToolSessionOverrides.toolName,
     );
-  return rows.map((row) => ({
-    integrationId: row.integrationId,
-    toolName: row.toolName,
-    mode: row.mode,
-  }));
+  return expandRenamedIntegrationToolPolicies(
+    rows.map((row) => ({
+      integrationId: row.integrationId,
+      toolName: row.toolName,
+      mode: row.mode,
+    })),
+  );
 }
 
 /**
@@ -968,7 +1004,12 @@ export async function claimAutoApprovedIntegrationToolApproval(input: {
                   eq(rejection.decidedByUserId, input.requesterUserId),
                   isNull(rejection.taskId),
                   eq(rejection.integrationId, tool.integrationId),
-                  eq(rejection.toolName, tool.toolName),
+                  inArray(rejection.toolName, [
+                    ...getIntegrationMcpToolAliases(
+                      tool.integrationId,
+                      tool.toolName,
+                    ),
+                  ]),
                   eq(rejection.status, 'rejected'),
                 ),
               ),

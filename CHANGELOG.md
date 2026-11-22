@@ -2,6 +2,25 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.24.0 (2026-11-22)
+
+Roomote 1.24.0 adds GPT-6.2 models, upgrades Jira connectivity, and strengthens account security.
+
+### Highlights
+
+- Choose GPT-6.2 Sol or Astra, including Fast mode on ChatGPT Subscription, without changing existing model selections.
+- Jira now uses Atlassian MCP v2. **After upgrading, an admin must reconnect Jira and grant fresh consent.**
+- Account security updates harden OAuth verification and email-change links. Sign in normally if you open an email-change verification link without an active session.
+
+### Minor changes
+
+- GPT-6.2 Sol and GPT-6.2 Astra are available in the curated model catalog through supported inference providers, with Fast mode for both on ChatGPT Subscription. Enable them in Models settings and select them for a role, session, or task; existing defaults, presets, and saved mappings stay unchanged. Thanks to @pridemusvaire for proposing and contributing this improvement in [#3731](https://github.com/RooCodeInc/Roomote/issues/3731).
+
+### Patch changes
+
+- Security updates harden OAuth email-verification checks and prevent stale email-change links from affecting a different account after an address is reused. Email-change verification links no longer automatically sign you in; use normal sign-in if you open one without an active session.
+- Jira now uses Atlassian MCP v2 with read-only Jira access and reliable tool catalog initialization and pagination. Saved tool restrictions and approval requirements carry across renamed tools. After upgrading, a deployment admin must reconnect Jira from Integrations and complete fresh Atlassian consent; existing v1 credentials do not carry over.
+
 ## 1.23.0 (2026-11-17)
 
 Roomote 1.23.0 stops self-hosted deployments from sending analytics to the Roomote team.

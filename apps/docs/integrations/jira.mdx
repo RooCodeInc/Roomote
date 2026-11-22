@@ -17,6 +17,25 @@ Roomote to read issue, project, workflow, and JQL-backed context directly.
 
 Admins connect Jira from the **Integrations** page for the deployment.
 
+Roomote uses Atlassian MCP v2 with read-only Jira permissions. Complete the
+Atlassian OAuth consent flow with an account that can access the Jira sites
+you want Roomote to read. The built-in integration exposes individual Jira
+tools; it does not enable Jira mutations or other Atlassian products.
+
+### Upgrading an existing connection
+
+Atlassian MCP v2 is a separate OAuth resource, so v1 credentials do not carry
+over. After upgrading Roomote, a deployment admin must reconnect Jira from
+the **Integrations** page and complete fresh Atlassian consent. Reconnecting
+replaces the saved OAuth client registration. If authorization still fails,
+disconnect Jira, then enable and connect it again.
+
+To verify the connection, ask Roomote to list accessible Jira sites and read a
+known issue or run a JQL search. Access still depends on the connected account's
+Jira permissions and your Atlassian organization's MCP settings.
+
+See Atlassian's [MCP v2 upgrade guide](https://support.atlassian.com/atlassian-ai-gateway/docs/how-to-upgrade-from-atlassian-mcp-v1-to-atlassian-mcp-v2/).
+
 ## What to expect
 
 Jira gives Roomote richer issue context. The task transcript, evidence, and any

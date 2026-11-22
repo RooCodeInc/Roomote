@@ -21,6 +21,7 @@ import { AUTO_DECISION_REQUIREMENTS } from '@roomote/cloud-agents/server/integra
 import { resolveDecisionModel } from '@roomote/cloud-agents/server/typesafe-judgment';
 import {
   getMcpIntegration,
+  getIntegrationMcpToolAliases,
   type IntegrationToolAutoSettings,
   type IntegrationToolPoliciesUpsert,
   type IntegrationToolPolicyMode,
@@ -130,7 +131,9 @@ async function syncLegacyDisabledTools(input: {
     if (!enablement) return;
 
     const disabledTools = new Set(enablement.disabledTools ?? []);
-    for (const toolName of input.toolNames) {
+    for (const toolName of input.toolNames.flatMap((name) => [
+      ...getIntegrationMcpToolAliases(input.integrationId, name),
+    ])) {
       if (input.mode === 'reject') disabledTools.add(toolName);
       else disabledTools.delete(toolName);
     }

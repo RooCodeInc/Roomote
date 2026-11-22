@@ -59,6 +59,31 @@ describe('Linear OAuth scopes', () => {
   });
 });
 
+describe('Jira MCP v2 OAuth', () => {
+  it('uses flat tools and the v2 OAuth resource with Jira-only read scopes', () => {
+    expect(getMcpIntegration('jira')).toMatchObject({
+      url: 'https://mcp.atlassian.com/v2/mcp?tools=all',
+      connectionScope: 'deployment',
+      oauthResource: 'https://mcp.atlassian.com/v2/mcp',
+      oauthScopeMode: 'read-only',
+      oauthEndpoints: {
+        authorizationEndpoint: 'https://auth.atlassian.com/authorize',
+        tokenEndpoint: 'https://auth.atlassian.com/oauth/token',
+        registrationEndpoint:
+          'https://auth.atlassian.com/VCeDsk8ZHncYF1g234fKtc4lNipbBhu3/dcr/register',
+        tokenEndpointAuthMethod: 'none',
+      },
+    });
+    expect(getMcpIntegrationOauthScopes('jira')).toEqual([
+      'read:me',
+      'read:account',
+      'offline_access',
+      'read:jira:agent-interface',
+      'search:jira:agent-interface',
+    ]);
+  });
+});
+
 describe('monday.com OAuth', () => {
   it('uses the hosted MCP with a user-scoped read-only connection', () => {
     expect(getMcpIntegration('monday')).toMatchObject({

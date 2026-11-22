@@ -1,4 +1,6 @@
 import { generateKeyPairSync, sign } from 'node:crypto';
+import { createServer } from 'node:http';
+import { once } from 'node:events';
 import { authAccounts, authUsers, db, eq } from '@roomote/db/server';
 
 vi.mock('./bootstrap-runtime-env', () => ({ bootstrapWebRuntimeEnv: vi.fn() }));
@@ -41,7 +43,7 @@ let exchanges: URLSearchParams[];
 let userIds: string[];
 let extraClaims: Record<string, unknown>;
 let tokenNonce: string | null;
-let slackEmailVerified: boolean;
+let slackEmailVerified: boolean | string;
 
 function jwt() {
   const encode = (value: object) =>
@@ -386,6 +388,100 @@ it('retains returning generic OAuth sign-in by existing provider identity', asyn
   ).toBe(user.id);
 });
 
+it('completes configured GitLab OAuth against a real local HTTP provider', async () => {
+  vi.unstubAllGlobals();
+  const user = await existingUser('gitlab');
+  const code = crypto.randomUUID();
+  const accessToken = crypto.randomUUID();
+  let redirectUri = '';
+  let exchanged = false;
+  let profileRequests = 0;
+  const server = createServer(async (req, res) => {
+    const url = new URL(req.url!, 'http://provider.test');
+    if (url.pathname === '/oauth/authorize') {
+      redirectUri = url.searchParams.get('redirect_uri')!;
+      const callback = new URL(redirectUri);
+      callback.searchParams.set('code', code);
+      callback.searchParams.set('state', url.searchParams.get('state')!);
+      res.writeHead(302, { location: callback.toString() }).end();
+      return;
+    }
+    if (url.pathname === '/oauth/token') {
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) chunks.push(Buffer.from(chunk));
+      const body = new URLSearchParams(Buffer.concat(chunks).toString());
+      if (
+        exchanged ||
+        body.get('code') !== code ||
+        body.get('redirect_uri') !== redirectUri ||
+        body.get('grant_type') !== 'authorization_code' ||
+        body.get('client_id') !== 'fixture-client'
+      ) {
+        res.writeHead(400).end();
+        return;
+      }
+      exchanged = true;
+      res.setHeader('content-type', 'application/json');
+      res.end(
+        JSON.stringify({ access_token: accessToken, token_type: 'Bearer' }),
+      );
+      return;
+    }
+    if (
+      url.pathname === '/api/v4/user' &&
+      req.headers.authorization === `Bearer ${accessToken}`
+    ) {
+      profileRequests++;
+      res.setHeader('content-type', 'application/json');
+      res.end(
+        JSON.stringify({
+          id: subject,
+          username: 'local-fixture',
+          email: `${subject}@example.test`,
+          name: 'Local OAuth Fixture',
+        }),
+      );
+      return;
+    }
+    res.writeHead(404).end();
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  try {
+    const address = server.address();
+    if (!address || typeof address === 'string')
+      throw new Error('Missing provider port');
+    const config = await resolveAuthProviderConfig();
+    vi.mocked(resolveAuthProviderConfig).mockResolvedValue({
+      ...config,
+      signature: crypto.randomUUID(),
+      gitlabBaseUrl: `http://127.0.0.1:${address.port}`,
+    });
+    const started = await start('gitlab');
+    const authorization = await fetch(started.url, { redirect: 'manual' });
+    expect(authorization.status).toBe(302);
+    const callback = await handleAuthRequest(
+      new Request(authorization.headers.get('location')!, {
+        headers: { cookie: cookies(started.response) },
+      }),
+    );
+    expect(callback.headers.get('location')).toBe('/settings/personal');
+    expect(exchanged).toBe(true);
+    expect(profileRequests).toBeGreaterThan(0);
+    const session = await request('get-session', undefined, cookies(callback));
+    expect((await session.json()).user.id).toBe(user.id);
+    expect(
+      await db.query.authAccounts.findMany({
+        where: eq(authAccounts.userId, user.id),
+      }),
+    ).toHaveLength(1);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+  }
+});
+
 it.each(['slack', 'gitlab', 'microsoft-entra-id'])(
   'keeps unverified %s profiles out of implicit email linking',
   async (provider) => {
@@ -404,6 +500,52 @@ it.each(['slack', 'gitlab', 'microsoft-entra-id'])(
         where: eq(authAccounts.accountId, subject),
       }),
     ).toBeUndefined();
+  },
+);
+
+it.each([
+  { claim: 'false', links: false },
+  { claim: '0', links: false },
+  { claim: 'unverified', links: false },
+  { claim: false, links: false },
+  { claim: true, links: true },
+  { claim: 'true', links: true },
+])(
+  'parses Slack verification claim $claim when linking to a verified local account (links=$links)',
+  async ({ claim, links }) => {
+    slackEmailVerified = claim;
+    const signup = await request('sign-up/email', {
+      email: `${subject}@example.test`,
+      name: 'Existing Fixture',
+      password: 'Fixture-password-123!',
+    });
+    expect(signup.status).toBe(200);
+    const userId = (await signup.json()).user.id as string;
+    userIds.push(userId);
+    // Isolate provider-claim parsing from the independent local-email guard.
+    await db
+      .update(authUsers)
+      .set({ emailVerified: true })
+      .where(eq(authUsers.id, userId));
+    expect(
+      await db.query.authUsers.findFirst({ where: eq(authUsers.id, userId) }),
+    ).toMatchObject({ emailVerified: true });
+    const response = await finish('slack', await start('slack'));
+    const session = await (
+      await request('get-session', undefined, cookies(response))
+    ).json();
+    const linkedAccount = await db.query.authAccounts.findFirst({
+      where: eq(authAccounts.accountId, subject),
+    });
+    if (links) {
+      expect(response.headers.get('location')).toBe('/settings/personal');
+      expect(session?.user.id).toBe(userId);
+      expect(linkedAccount).toMatchObject({ userId, providerId: 'slack' });
+      return;
+    }
+    expect(response.headers.get('location')).toContain('error=');
+    expect(session).toBeNull();
+    expect(linkedAccount).toBeUndefined();
   },
 );
 
