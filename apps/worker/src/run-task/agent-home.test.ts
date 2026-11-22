@@ -1338,6 +1338,7 @@ describe('generateOpenCodeConfig provider support', () => {
       R_SMALL_MODEL: 'openai/gpt-6-luna',
       R_VISION_MODEL: 'openai/gpt-6.1-sol',
       R_CODE_REVIEW_MODEL: 'openai/gpt-6.1-terra',
+      R_PLANNING_MODEL: 'openai/gpt-6.2-sol',
       R_MODEL_REASONING_EFFORT: 'high',
       R_CHATGPT_FAST_MODE: '1',
     };
@@ -1363,6 +1364,9 @@ describe('generateOpenCodeConfig provider support', () => {
       serviceTier: 'priority',
     });
     expect(config.provider.openai?.models?.['gpt-6.1-terra']?.options).toEqual({
+      serviceTier: 'priority',
+    });
+    expect(config.provider.openai?.models?.['gpt-6.2-sol']?.options).toEqual({
       serviceTier: 'priority',
     });
     expect(runtimeEnv).not.toHaveProperty('R_CHATGPT_FAST_MODE');

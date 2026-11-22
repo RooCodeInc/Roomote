@@ -772,6 +772,19 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         ],
       },
       {
+        displayName: 'GPT-6.2 Astra',
+        modelId: 'gpt-6.2-astra',
+        providerIds: [
+          'roomote',
+          'openrouter',
+          'vercel',
+          'openai',
+          'opencode',
+          'github-copilot',
+          'chatgpt',
+        ],
+      },
+      {
         displayName: 'GPT 5.6 Sol',
         modelId: 'gpt-5.6-sol',
         providerIds: pairedGpt6ProviderIds,
@@ -784,6 +797,11 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       {
         displayName: 'GPT-6.1 Sol',
         modelId: 'gpt-6.1-sol',
+        providerIds: pairedGpt6ProviderIds,
+      },
+      {
+        displayName: 'GPT-6.2 Sol',
+        modelId: 'gpt-6.2-sol',
         providerIds: pairedGpt6ProviderIds,
       },
       {
@@ -1251,6 +1269,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       'requesty/gpt-5.6-sol@eu',
       'requesty/gpt-6-sol@eu',
       'requesty/gpt-6.1-sol@eu',
+      'requesty/gpt-6.2-sol@eu',
       'requesty/azure/gpt-6.1-terra@swedencentral',
       'requesty/gpt-5.6-terra@eu',
       'requesty/gpt-5.6-luna@eu',
