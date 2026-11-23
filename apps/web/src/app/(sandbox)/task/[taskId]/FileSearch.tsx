@@ -41,19 +41,28 @@ export const FileSearch = ({
   const [results, setResults] = useState<FileResult[]>([]);
   const [loading, setLoading] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const requestIdRef = useRef(0);
 
-  // Reset state when dialog closes
+  const invalidateSearch = useCallback(() => {
+    clearTimeout(debounceRef.current);
+    return ++requestIdRef.current;
+  }, []);
+
+  // A dialog opening and sandbox connection each own their pending searches.
   useEffect(() => {
-    if (!open) {
-      setQuery('');
-      setResults([]);
-      setLoading(false);
-    }
-  }, [open]);
+    invalidateSearch();
+    setResults([]);
+    setLoading(false);
+    if (!open) setQuery('');
+    return () => {
+      invalidateSearch();
+    };
+  }, [open, client, connected, invalidateSearch]);
 
   const search = useCallback(
-    async (q: string) => {
-      if (!client || !connected || !q.trim()) {
+    async (q: string, requestId: number) => {
+      if (requestId !== requestIdRef.current) return;
+      if (!open || !client || !connected || !q.trim()) {
         setResults([]);
         setLoading(false);
         return;
@@ -67,24 +76,24 @@ export const FileSearch = ({
           maxResults: 20,
         });
 
-        setResults(response.results);
+        if (requestId === requestIdRef.current) setResults(response.results);
       } catch (err) {
-        console.error('[FileSearch] searchFiles error:', err);
-        setResults([]);
+        if (requestId === requestIdRef.current) {
+          console.error('[FileSearch] searchFiles error:', err);
+          setResults([]);
+        }
       } finally {
-        setLoading(false);
+        if (requestId === requestIdRef.current) setLoading(false);
       }
     },
-    [client, connected],
+    [open, client, connected],
   );
 
   const handleQueryChange = useCallback(
     (value: string) => {
       setQuery(value);
-
-      if (debounceRef.current) {
-        clearTimeout(debounceRef.current);
-      }
+      const requestId = invalidateSearch();
+      setResults([]);
 
       if (!value.trim()) {
         setResults([]);
@@ -94,10 +103,10 @@ export const FileSearch = ({
 
       setLoading(true);
       debounceRef.current = setTimeout(() => {
-        search(value);
+        search(value, requestId);
       }, 300);
     },
-    [search],
+    [search, invalidateSearch],
   );
 
   const handleSelect = useCallback(
