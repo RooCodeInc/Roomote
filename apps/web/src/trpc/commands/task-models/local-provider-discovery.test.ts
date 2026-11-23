@@ -376,6 +376,8 @@ describe('qualifyProviderModel', () => {
                 response: {
                   status: 'completed',
                   output: [
+                    // Reasoning models emit this first; it must not be replayed.
+                    { type: 'reasoning', id: 'rs_ping', summary: [] },
                     {
                       ...call,
                       ...(outcome === 'invalid-arguments'
@@ -421,14 +423,20 @@ describe('qualifyProviderModel', () => {
         if (!['invalid-arguments', 'missing-call-id'].includes(outcome)) {
           expect(requests).toHaveLength(2);
           expect(requests[1]?.body).toMatchObject({
-            input: expect.arrayContaining([
-              call,
+            input: [
+              expect.objectContaining({ role: 'user' }),
+              {
+                type: 'function_call',
+                call_id: 'call_ping',
+                name: 'ping',
+                arguments: '{}',
+              },
               {
                 type: 'function_call_output',
                 call_id: 'call_ping',
                 output: 'pong',
               },
-            ]),
+            ],
             tool_choice: 'none',
           });
         }
@@ -440,6 +448,68 @@ describe('qualifyProviderModel', () => {
       }
     },
   );
+
+  it('tolerates repeated call IDs, empty arguments, and a continuation without a stop reason', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        [
+          'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_ping","function":{"name":"ping","arguments":""}}]}}]}\n\n',
+          'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_ping","function":{"arguments":""}}]}}]}\n\n',
+        ].join(''),
+        { headers: { 'content-type': 'text/event-stream' } },
+      ),
+    );
+    fetchMock.mockResolvedValueOnce(
+      new Response('data: {"choices":[{"delta":{"content":"pong"}}]}\n\n', {
+        headers: { 'content-type': 'text/event-stream' },
+      }),
+    );
+
+    await expect(
+      qualifyProviderModel({
+        provider: 'litellm',
+        baseUrl: 'https://litellm.example/v1',
+        modelId: 'litellm/claude',
+      }),
+    ).resolves.toEqual({ success: true });
+    const continuation = JSON.parse(
+      (fetchMock.mock.calls[1] as [string, RequestInit])[1].body as string,
+    );
+    expect(continuation.tools).toHaveLength(1);
+    expect(continuation.messages.slice(1)).toEqual([
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          {
+            id: 'call_ping',
+            type: 'function',
+            function: { name: 'ping', arguments: '{}' },
+          },
+        ],
+      },
+      { role: 'tool', tool_call_id: 'call_ping', content: 'pong' },
+    ]);
+  });
+
+  it('reports an invalid saved protocol without throwing or sending a request', async () => {
+    mockGetPersistedEnvironmentVariableValues.mockResolvedValue({
+      OPENAI_COMPATIBLE_NATIVE_PROTOCOL: 'invalid',
+    });
+
+    await expect(
+      qualifyProviderModel({
+        provider: 'openai-compatible-native',
+        baseUrl: 'https://gateway.example/v1',
+        modelId: 'openai-compatible-native/model',
+      }),
+    ).resolves.toEqual({
+      success: false,
+      error:
+        'OpenAI-compatible API protocol must be chat-completions or responses.',
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 
   it('qualifies a provider model with a streaming tool request', async () => {
     fetchMock.mockResolvedValueOnce(

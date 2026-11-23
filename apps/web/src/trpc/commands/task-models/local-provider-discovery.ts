@@ -76,7 +76,9 @@ export type LocalProviderConnectionInput = {
 };
 
 type LocalProviderConnection = {
-  protocol: OpenAiCompatibleProtocol;
+  /** Unvalidated: only qualification depends on it, so a bad value must not
+   * break model discovery. */
+  protocol: string | undefined;
   baseUrl: string;
   apiKey: string | null;
 };
@@ -354,13 +356,12 @@ async function resolveLocalProviderConnection(
 
   return {
     baseUrl,
-    protocol: resolveOpenAiCompatibleProtocol(
+    protocol:
       input?.protocol ??
-        (instance
-          ? (process.env[instance.protocolEnvVarName] ??
-            persisted[instance.protocolEnvVarName])
-          : undefined),
-    ),
+      (instance
+        ? process.env[instance.protocolEnvVarName]?.trim() ||
+          persisted[instance.protocolEnvVarName]
+        : undefined),
     apiKey:
       (clearingApiKey ? undefined : input?.apiKey?.trim()) ||
       (envNames.apiKey ? process.env[envNames.apiKey] : null) ||
@@ -546,6 +547,38 @@ export async function discoverProviderModels(
   return fetchLocalProviderModels(input.provider, connection);
 }
 
+const CHAT_COMPLETIONS_PING_TOOLS = [
+  {
+    type: 'function',
+    function: {
+      name: 'ping',
+      description: 'Returns a short health-check response.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+];
+
+/** `fetch` rejects with a TypeError when the endpoint is unreachable and with
+ * a Timeout/Abort DOMException when the request deadline passes. */
+function isQualificationNetworkError(error: unknown): boolean {
+  return (
+    error instanceof TypeError ||
+    (error instanceof Error &&
+      (error.name === 'TimeoutError' || error.name === 'AbortError'))
+  );
+}
+
+/** Servers may stream an empty string for a tool without parameters. */
+function isValidToolArguments(value: string | undefined): boolean {
+  if (!value?.trim()) return true;
+  try {
+    const args: unknown = JSON.parse(value);
+    return Boolean(args) && typeof args === 'object' && !Array.isArray(args);
+  } catch {
+    return false;
+  }
+}
+
 const responsesEventSchema = z.object({
   type: z.string(),
   response: z
@@ -690,23 +723,26 @@ async function qualifyResponsesModel(
     const calls = output.filter((item) => item.type === 'function_call');
     if (
       !calls.length ||
-      calls.some(
-        (call) => call.name !== 'ping' || !call.call_id || !call.arguments,
-      )
+      calls.some((call) => call.name !== 'ping' || !call.call_id)
     ) {
       throw new Error(
-        'The model streamed a response but did not call the required tool with a call ID and arguments.',
+        'The model streamed a response but did not call the required tool with a call ID.',
       );
     }
-    for (const call of calls) {
-      const args: unknown = JSON.parse(call.arguments!);
-      if (!args || typeof args !== 'object' || Array.isArray(args))
-        throw new Error('The model returned invalid tool arguments.');
-    }
+    if (calls.some((call) => !isValidToolArguments(call.arguments)))
+      throw new Error('The model returned invalid tool arguments.');
     const continuation = await request(
       [
         prompt,
-        ...output,
+        // Replay only the function calls, without their item IDs. Reasoning
+        // items and item IDs reference server-side state that does not exist
+        // with `store: false`, so endpoints reject them when sent back.
+        ...calls.map((call) => ({
+          type: 'function_call',
+          call_id: call.call_id,
+          name: call.name,
+          arguments: call.arguments?.trim() || '{}',
+        })),
         ...calls.map((call) => ({
           type: 'function_call_output',
           call_id: call.call_id,
@@ -732,8 +768,9 @@ async function qualifyResponsesModel(
   } catch (error) {
     return {
       success: false,
-      error:
-        error instanceof Error
+      error: isQualificationNetworkError(error)
+        ? getLocalProviderNetworkError(provider)
+        : error instanceof Error
           ? error.message
           : 'Responses API qualification failed.',
     };
@@ -763,7 +800,7 @@ export async function qualifyProviderModel(
   }
 
   try {
-    if (connection.protocol === 'responses') {
+    if (resolveOpenAiCompatibleProtocol(connection.protocol) === 'responses') {
       return await qualifyResponsesModel(input.provider, modelId, connection);
     }
     const response = await fetch(
@@ -779,16 +816,7 @@ export async function qualifyProviderModel(
           messages: [{ role: 'user', content: 'Reply with pong.' }],
           stream: true,
           tool_choice: 'required',
-          tools: [
-            {
-              type: 'function',
-              function: {
-                name: 'ping',
-                description: 'Returns a short health-check response.',
-                parameters: { type: 'object', properties: {} },
-              },
-            },
-          ],
+          tools: CHAT_COMPLETIONS_PING_TOOLS,
         }),
         signal: AbortSignal.timeout(LOCAL_PROVIDER_REQUEST_TIMEOUT_MS),
       },
@@ -824,7 +852,8 @@ export async function qualifyProviderModel(
           };
           toolCalls.set(key, {
             ...previous,
-            id: previous.id + (call.id ?? ''),
+            // IDs are not fragmented, and some servers repeat them per delta.
+            id: previous.id || (call.id ?? ''),
             function: {
               name: previous.function.name + (call.function?.name ?? ''),
               arguments:
@@ -835,28 +864,24 @@ export async function qualifyProviderModel(
       });
     }
 
-    const calls = [...toolCalls.values()];
-    if (
-      !calls.length ||
-      calls.some(
-        (call) =>
-          call.function.name !== 'ping' || !call.id || !call.function.arguments,
-      )
-    ) {
+    // Normalize what servers legitimately omit: a missing call ID (the runtime
+    // SDK generates one too) and empty arguments for a parameterless tool.
+    const calls = [...toolCalls.values()].map((call, index) => ({
+      ...call,
+      id: call.id || `call_${index}`,
+    }));
+    if (!calls.length || calls.some((call) => call.function.name !== 'ping')) {
       return {
         success: false,
         error:
           'The model streamed a response but did not call the required tool. Choose a model with OpenAI-compatible tool calling.',
       };
     }
-    for (const call of calls) {
-      const args: unknown = JSON.parse(call.function.arguments);
-      if (!args || typeof args !== 'object' || Array.isArray(args)) {
-        return {
-          success: false,
-          error: 'The model returned invalid tool arguments.',
-        };
-      }
+    if (calls.some((call) => !isValidToolArguments(call.function.arguments))) {
+      return {
+        success: false,
+        error: 'The model returned invalid tool arguments.',
+      };
     }
     const continuation = await fetch(
       getLocalProviderBaseUrl(connection.baseUrl, '/v1/chat/completions'),
@@ -871,13 +896,25 @@ export async function qualifyProviderModel(
           stream: true,
           messages: [
             { role: 'user', content: 'Reply with pong.' },
-            { role: 'assistant', content: null, tool_calls: calls },
+            {
+              role: 'assistant',
+              content: null,
+              tool_calls: calls.map((call) => ({
+                ...call,
+                function: {
+                  ...call.function,
+                  arguments: call.function.arguments.trim() || '{}',
+                },
+              })),
+            },
             ...calls.map((call) => ({
               role: 'tool',
               tool_call_id: call.id,
               content: 'pong',
             })),
           ],
+          // Several gateways reject tool-call history sent without tools.
+          tools: CHAT_COMPLETIONS_PING_TOOLS,
         }),
         signal: AbortSignal.timeout(LOCAL_PROVIDER_REQUEST_TIMEOUT_MS),
       },
@@ -891,8 +928,10 @@ export async function qualifyProviderModel(
     const completion = z.object({
       choices: z.array(
         z.object({
-          delta: z.object({ content: z.string().nullable().optional() }),
-          finish_reason: z.string().nullable().optional(),
+          delta: z.object({
+            content: z.string().nullable().optional(),
+            tool_calls: z.array(z.unknown()).optional(),
+          }),
         }),
       ),
     });
@@ -905,13 +944,17 @@ export async function qualifyProviderModel(
         (event) =>
           typeof event === 'object' && event !== null && 'error' in event,
       ) ||
-      !choices.some((choice) => choice.delta.content?.trim()) ||
-      !choices.some((choice) => choice.finish_reason === 'stop')
+      // The endpoint accepted the tool output if the model kept going, whether
+      // with text or another call; finish reasons vary too much to require.
+      !choices.some(
+        (choice) =>
+          choice.delta.content?.trim() || choice.delta.tool_calls?.length,
+      )
     ) {
       return {
         success: false,
         error:
-          'The streamed tool output continuation did not complete with a text response.',
+          'The provider did not continue the response after receiving the tool output.',
       };
     }
     return { success: true };
@@ -919,7 +962,7 @@ export async function qualifyProviderModel(
     return {
       success: false,
       error:
-        error instanceof Error && !(error instanceof TypeError)
+        error instanceof Error && !isQualificationNetworkError(error)
           ? error.message
           : getLocalProviderNetworkError(input.provider),
     };

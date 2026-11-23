@@ -2145,7 +2145,7 @@ describe('generateOpenCodeConfig provider support', () => {
       options: {
         baseURL:
           'https://api.example.com/api/inference/openai-compatible-native/v1',
-        apiKey: expect.any(String),
+        apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
       },
       models: { model: { name: 'model' } },
     });
