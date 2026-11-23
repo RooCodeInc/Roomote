@@ -55,13 +55,23 @@ worker process that is still running but no longer draining jobs.
 
 Restore only after installing Roomote on the replacement host:
 
+<Warning>
+  Restore overwrites the destination deployment's configuration and data;
+  `--yes` confirms that destructive operation. The restored `.env` contains the
+  original `DATABASE_URL`. If it points to an external database, restoring on a
+  replacement host can still overwrite that original database. Review and
+  isolate the recovery target before running the command.
+</Warning>
+
 ```sh
 roomote restore /path/to/backup.roomote --yes
 ```
 
 Restore verifies the encrypted bundle and checksums before replacing any
-state, restores the original `.env` (including `ENCRYPTION_KEY`), repopulates
-empty PostgreSQL/MinIO/Redis volumes, and starts the recorded Roomote release.
+state, restores the original `.env` (including `ENCRYPTION_KEY`), replaces the
+target PostgreSQL data and included local volume contents, and starts the
+recorded Roomote release. If Redis was omitted from the backup, restore clears
+its transient queue and session state instead of recovering it.
 
 ## Upgrades and rollback
 

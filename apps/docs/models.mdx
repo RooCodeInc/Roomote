@@ -106,12 +106,16 @@ so a missing usage line does not by itself mean the connection is broken.
 
 ### Self-hosted and gateway providers
 
-OpenAI-compatible connections support a per-connection **API protocol** choice:
+On `develop` after Roomote 1.24.0, OpenAI-compatible connections support a
+per-connection **API protocol** choice:
 **Chat Completions** (the default for existing connections) or **Responses API**.
 Both use the existing model picker and support streaming tool calls. Choose the
 protocol implemented by your endpoint; listing models alone does not verify it.
 See the [OpenAI-compatible guide](/providers/inference/openai-compatible) for
 connection configuration and tool-output verification.
+
+Roomote 1.24.0 uses Chat Completions for these connections; the protocol selector
+and Responses support are not included in that release.
 
 OpenAI-compatible endpoints let you bring any server that speaks the OpenAI
 `/v1` API — including LiteLLM, Ollama, vLLM, and custom proxies. Models are

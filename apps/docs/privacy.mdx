@@ -82,6 +82,17 @@ Managed deployments always send anonymous telemetry, as described in our
 privacy policy. Cookie consent controls only optional support and
 product-experience services such as Intercom and PostHog.
 
+## Sharing platform issue reports
+
+An administrator can explicitly confirm **Send to Roomote** for a platform
+issue report. This also works on self-hosted production deployments and is
+separate from anonymous analytics. It sends the report's title and summary,
+its task or session URL, the report and instance IDs, the application version,
+and the submission time to Roomote's reporting service. Review the report
+before confirming; its text and source URL can identify your deployment. A
+task reporting an issue inside the deployment does not itself send it to
+Roomote.
+
 ## Version checks
 
 Once a day, every deployment reads the latest published Roomote release from
