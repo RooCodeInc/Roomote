@@ -23,6 +23,7 @@ import {
   TASK_MODEL_ROLE_DESCRIPTORS,
   TASK_MODEL_ROLES,
   SETUP_MODEL_PROVIDER_CATALOG,
+  OPENAI_COMPATIBLE_PROTOCOL_OPTIONS,
   buildOpenAiCompatibleProviderId,
   buildOpenAiCompatibleProviderInstance,
   buildRecommendedDeploymentModelConfig,
@@ -30,6 +31,7 @@ import {
   buildTaskModelOption,
   collectSetupModelProviderCredentialValues,
   getDefaultTaskModel,
+  getOpenAiCompatibleProviderInstance,
   getSetupModelProviderAdditionalEnvFields,
   getSetupModelProviderEnvVarNames,
   getSetupModelProvider,
@@ -91,6 +93,7 @@ import {
 import {
   discoverProviderModels,
   getLocalTaskModelProviderIdFromModelId,
+  getOpenAiCompatibleProtocolWarning,
   qualifyProviderModel,
   type LocalProviderConnectionInput,
   type LocalTaskModelProviderId,
@@ -687,6 +690,10 @@ export async function saveTaskModelProviderCommand(
         for (const [name, value] of Object.entries(
           input.additionalEnvValues ?? {},
         )) {
+          if (name === 'OPENAI_COMPATIBLE_PROTOCOL') {
+            remappedAdditional[instance.protocolEnvVarName] = value;
+            continue;
+          }
           if (name === 'OPENAI_COMPATIBLE_API_KEY') {
             remappedAdditional[instance.apiKeyEnvVarName] = value;
             continue;
@@ -789,6 +796,27 @@ export async function saveTaskModelProviderCommand(
           probe.failureReason === 'invalid_endpoint')
       ) {
         throw new Error(`${provider.label}: ${probe.error}`);
+      }
+
+      // Listing models says nothing about which inference protocol the
+      // endpoint serves, so flag a selected protocol whose route is missing.
+      const instance = getOpenAiCompatibleProviderInstance(provider.id);
+      if (instance && !probe.error) {
+        validationWarning = await getOpenAiCompatibleProtocolWarning({
+          provider: provider.id as LocalTaskModelProviderId,
+          baseUrl: provider.envVarName
+            ? candidateValueByName.get(provider.envVarName)
+            : undefined,
+          apiKey: secretField
+            ? clearedEnvVarNames.includes(secretField.envVarName)
+              ? null
+              : candidateValueByName.get(secretField.envVarName)
+            : undefined,
+          protocol: OPENAI_COMPATIBLE_PROTOCOL_OPTIONS.find(
+            ({ value }) =>
+              value === candidateValueByName.get(instance.protocolEnvVarName),
+          )?.value,
+        });
       }
     }
   }

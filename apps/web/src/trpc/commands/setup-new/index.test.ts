@@ -302,6 +302,7 @@ import {
   saveSetupBootstrapAuthProviderChoiceCommand,
   saveSetupNewAuthConfigCommand,
   saveSetupNewComputeConfigCommand,
+  saveSetupNewModelConfigCommand,
   saveSetupNewComputeProviderChoiceCommand,
   saveSetupNewSourceControlConfigCommand,
   saveSetupNewSourceControlProviderChoiceCommand,
@@ -375,6 +376,66 @@ function createGroupBySelectChain(result: unknown) {
     })),
   };
 }
+
+describe('setup-new named endpoint protocol save', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockTxSelect.mockReset();
+    mockGetPersistedEnvironmentVariableNames.mockResolvedValue([]);
+    mockValidateSetupModelProviderCredentials.mockResolvedValue(undefined);
+    mockDbTransaction.mockImplementation(async (callback) => {
+      mockTxSelect.mockImplementation(() =>
+        createSelectChain([{ setupNewState: {}, taskModelSettings: null }]),
+      );
+      return callback({
+        select: mockTxSelect,
+        insert: vi.fn(() => ({
+          values: vi.fn(() => ({
+            onConflictDoUpdate: vi.fn(async () => undefined),
+          })),
+        })),
+      });
+    });
+  });
+
+  it.each(['chat-completions', 'responses'])(
+    'saves the wizard protocol %s under the named connection without changing its model ID',
+    async (protocol) => {
+      const result = await saveSetupNewModelConfigCommand(buildMockAuth(), {
+        provider: 'openai-compatible',
+        connectionName: 'Native',
+        apiKey: 'https://gateway.example/v1',
+        additionalEnvValues: { OPENAI_COMPATIBLE_PROTOCOL: protocol },
+        modelId: 'openai-compatible/qwen3:8b',
+      });
+      expect(mockUpsertDeploymentEnvironmentVariables).toHaveBeenCalledWith(
+        expect.anything(),
+        {
+          userId: 'setup-test-user',
+          values: expect.arrayContaining([
+            {
+              name: 'OPENAI_COMPATIBLE_NATIVE_BASE_URL',
+              value: 'https://gateway.example/v1',
+            },
+            { name: 'OPENAI_COMPATIBLE_NATIVE_PROTOCOL', value: protocol },
+            { name: 'OPENAI_COMPATIBLE_NATIVE_LABEL', value: 'Native' },
+          ]),
+        },
+      );
+      expect(result.runtimeModelConfig.roomoteModel).toBe(
+        'openai-compatible-native/qwen3:8b',
+      );
+      expect(mockValidateSetupModelProviderCredentials).toHaveBeenCalledWith(
+        expect.objectContaining({
+          additionalEnvValues: {
+            OPENAI_COMPATIBLE_NATIVE_PROTOCOL: protocol,
+            OPENAI_COMPATIBLE_NATIVE_LABEL: 'Native',
+          },
+        }),
+      );
+    },
+  );
+});
 
 describe('setup-new auth config commands', () => {
   beforeEach(() => {

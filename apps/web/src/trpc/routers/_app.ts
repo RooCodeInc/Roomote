@@ -32,6 +32,7 @@ import {
   isSetupModelProviderId,
   JUDGMENT_MODEL_SELECTIONS,
   isOpenAiCompatibleProviderId,
+  OPENAI_COMPATIBLE_PROTOCOL_OPTIONS,
   customMcpServerInputSchema,
   customMcpServerVisibilitySchema,
   isOpenAiRealtimeVoiceId,
@@ -2793,6 +2794,9 @@ export const appRouter = createRouter({
               'Invalid local model provider.',
             ),
           modelId: z.string().trim().min(1),
+          protocol: z
+            .enum(OPENAI_COMPATIBLE_PROTOCOL_OPTIONS.map(({ value }) => value))
+            .optional(),
           baseUrl: z.string().trim().optional(),
           apiKey: z.string().trim().optional(),
         }),

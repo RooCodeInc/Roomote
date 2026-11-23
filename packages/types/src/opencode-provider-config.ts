@@ -265,6 +265,14 @@ export function mergeOpenAiCompatibleProviderConfig(
     }
 
     const existingProvider = asRecord(merged[providerId]);
+    const instance = getOpenAiCompatibleProviderInstance(providerId);
+    // Saving and qualification reject an unrecognized protocol. At run time it
+    // falls back to the default instead of throwing: this config is generated
+    // for every task, so one mistyped variable must not stop unrelated models.
+    const responses =
+      instance &&
+      runtimeEnv[instance.protocolEnvVarName]?.trim().toLowerCase() ===
+        'responses';
     const existingOptions = asRecord(existingProvider.options);
     const existingModels = asRecord(existingProvider.models);
     const directApiKey = provider.apiKeyEnvVarName
@@ -288,12 +296,15 @@ export function mergeOpenAiCompatibleProviderConfig(
       ...merged,
       [providerId]: {
         ...existingProvider,
-        npm: '@ai-sdk/openai-compatible',
+        npm: responses ? '@ai-sdk/openai' : '@ai-sdk/openai-compatible',
         name: provider.name,
         options: {
           ...existingOptions,
           baseURL,
           ...apiKeyOptions,
+          // Native OpenAI otherwise reads OPENAI_API_KEY, even for an arbitrary
+          // custom endpoint. A keyless connection must never inherit that key.
+          ...(responses && !directApiKey ? { apiKey: 'not-needed' } : {}),
         },
         models: {
           ...existingModels,

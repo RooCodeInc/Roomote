@@ -18,6 +18,13 @@ In **Settings > Models**, add **OpenAI-compatible**, enter a connection name
 (for example `company-proxy`), and provide the endpoint URL. An API key is
 optional and only needed when your endpoint requires bearer auth.
 
+Choose **API protocol** for each connection:
+
+- **Chat Completions** uses `/v1/chat/completions` and is the default for existing connections.
+- **Responses API** uses `/v1/responses` natively, including streaming function calls and tool outputs. Use this for Responses-only gateways; no translation proxy is needed.
+
+You can edit the protocol later without changing the connection or model IDs.
+
 Roomote stores each connection under namespaced deployment variables derived
 from the connection name. For a connection named `company-proxy`:
 
@@ -39,13 +46,20 @@ Model IDs use the `openai-compatible-<connection>/<model-id>` form, where
 `<connection>` is the slug from the connection name and `<model-id>` is the
 name returned by your endpoint.
 
+For a Responses connection, also set
+`OPENAI_COMPATIBLE_COMPANY_PROXY_PROTOCOL=responses`. For the legacy default
+connection, use `OPENAI_COMPATIBLE_PROTOCOL` alongside the existing base URL and
+optional key. Accepted values are `chat-completions` and `responses`; an omitted
+value uses Chat Completions. Settings and the model tool-call check reject any
+other value, and tasks treat it as Chat Completions.
+
 ## When to use this versus LiteLLM, Ollama, or vLLM
 
 Choose **OpenAI-compatible** when you want one clear setup path for any OpenAI
 API endpoint, or when you need several custom endpoints side by side. Choose the
 named LiteLLM, Ollama, or vLLM providers when you prefer those labels or their
-dedicated env var names. Runtime discovery and chat completion behavior are the
-same OpenAI `/v1` protocol for all of them.
+dedicated env var names. Those providers use Chat Completions. For a Responses-only
+endpoint, use an OpenAI-compatible connection with **Responses API** selected.
 
 ## Secure the endpoint
 
@@ -60,11 +74,23 @@ do not need direct network access to the endpoint or the API key.
 
 ## Verify setup
 
-1. add OpenAI-compatible with a connection name, endpoint URL, and optional API key
+1. add OpenAI-compatible with a connection name, endpoint URL, API protocol, and optional API key
 2. confirm models appear in **Settings > Models** under that connection
 3. enable one model and make it the default coding model
 4. start a small Roomote task and confirm it completes through the endpoint
 5. check the upstream server logs for the request
+
+Model discovery calls `/v1/models` regardless of protocol. A successful listing
+does not verify inference compatibility. When you save a connection, Roomote
+also checks that the endpoint serves the selected protocol's route and warns if
+it does not.
+
+First-run setup additionally runs a model tool-call check with the selected
+protocol. For Chat Completions it verifies a streamed function call. For
+Responses it verifies a streamed function call, sends its tool output, and
+verifies a completed streamed reply: the endpoint must accept
+`function_call_output` with the original call ID and conversation history
+(`store: false`); server-side response storage is not required.
 
 ## Common issues
 
@@ -73,6 +99,9 @@ do not need direct network access to the endpoint or the API key.
 - **Tasks cannot reach the endpoint.** Check DNS, container networking, firewall
   rules, and whether the endpoint is reachable from the Roomote deployment.
 - **Tool calling fails.** Roomote needs models that support tool calling. Confirm
-  the upstream model and gateway configuration expose tools over chat completions.
+  the upstream model and gateway configuration expose streamed tools and tool
+  output continuation over the selected protocol. A `/v1/responses` 404 usually
+  means the endpoint URL or selected protocol is incorrect; Roomote does not
+  silently fall back to Chat Completions.
 - **Two endpoints collide.** Give each OpenAI-compatible connection a distinct
   name so their env vars and `openai-compatible-<name>/...` model ids stay unique.
