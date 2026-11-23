@@ -14,6 +14,7 @@ import { headers } from 'next/headers';
 
 import type { UserAuthSuccess } from '@/types';
 import { getAuth } from '@/lib/server/auth';
+import { isEmailChannelEnabled } from '@/lib/server/env';
 import { userHasCredentialAccount } from '@/lib/server/user-management';
 import {
   DEFAULT_PERSONAL_PREFERENCES,
@@ -73,6 +74,7 @@ export async function getPersonalAccountCapabilitiesCommand(
   const hasCredentialAccount = await userHasCredentialAccount(auth.userId);
 
   return {
+    canChangeEmail: isEmailChannelEnabled(),
     canChangePassword: hasCredentialAccount,
     canSetPassword: !hasCredentialAccount,
   };
