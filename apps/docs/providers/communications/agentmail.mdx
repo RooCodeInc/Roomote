@@ -42,9 +42,10 @@ then:
 
 1. **Create the inbox** Roomote should receive mail at (or pick an existing
    one). AgentMail's free tier includes 3 inboxes and 100 emails per day and
-   adds a "Sent via AgentMail" footer to outbound mail; custom domains, with
-   AgentMail-managed SPF/DKIM/DMARC, need a paid plan and are recommended for
-   production.
+   adds a "Sent via AgentMail" footer to outbound mail. The free tier also
+   includes one custom domain with DKIM, SPF, and DMARC support; paid plans
+   remove the footer and provide higher limits. Review [AgentMail's current
+   pricing](https://www.agentmail.to/pricing) before choosing a production plan.
 2. **Create an API key from inside that inbox**, so the key is scoped to it.
    Give it these permissions (or full access): `inbox_read`, `inbox_update`,
    `webhook_read`, `webhook_create`, `webhook_update`, `webhook_delete`,
