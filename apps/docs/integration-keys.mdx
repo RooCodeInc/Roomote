@@ -83,8 +83,10 @@ calls the service through that base URL with the substitute as its bearer
 token, using curl, a script, an SDK, or a CLI, with any of the approved
 methods. Roomote's API forwards the request to the real origin and places the
 real key in the header the service expects. The substitute only works through
-that proxy, only from that task, and only while the approval and the task are
-live. The real key never enters the sandbox.
+that proxy and is bound to that task's workload generation and approval while
+both remain live. It does not prove which machine sent the request: a copied
+substitute can be used elsewhere during that window. The real key never enters
+the sandbox. See the [security boundary](#security-boundary).
 
 Coding tasks pick up approvals when they start or resume. A key approved while
 a task is already running becomes available to the next task.

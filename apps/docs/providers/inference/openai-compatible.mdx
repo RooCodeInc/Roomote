@@ -18,7 +18,14 @@ In **Settings > Models**, add **OpenAI-compatible**, enter a connection name
 (for example `company-proxy`), and provide the endpoint URL. An API key is
 optional and only needed when your endpoint requires bearer auth.
 
-Choose **API protocol** for each connection:
+<Note>
+  The **API protocol** selector and Responses API support are currently on
+  `develop` and are not included in Roomote 1.24.0. That release uses Chat
+  Completions for OpenAI-compatible connections. The protocol configuration and
+  checks below describe the unreleased implementation.
+</Note>
+
+Choose **API protocol** for each connection when running a version that includes it:
 
 - **Chat Completions** uses `/v1/chat/completions` and is the default for existing connections.
 - **Responses API** uses `/v1/responses` natively, including streaming function calls and tool outputs. Use this for Responses-only gateways; no translation proxy is needed.
