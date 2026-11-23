@@ -29,13 +29,7 @@ const qualificationChunkSchema = z.object({
           .array(
             z.object({
               index: z.number().int().nonnegative().optional(),
-              id: z.string().optional(),
-              function: z
-                .object({
-                  name: z.string().optional(),
-                  arguments: z.string().optional(),
-                })
-                .optional(),
+              function: z.object({ name: z.string().optional() }).optional(),
             }),
           )
           .optional(),
@@ -547,17 +541,6 @@ export async function discoverProviderModels(
   return fetchLocalProviderModels(input.provider, connection);
 }
 
-const CHAT_COMPLETIONS_PING_TOOLS = [
-  {
-    type: 'function',
-    function: {
-      name: 'ping',
-      description: 'Returns a short health-check response.',
-      parameters: { type: 'object', properties: {} },
-    },
-  },
-];
-
 /** `fetch` rejects with a TypeError when the endpoint is unreachable and with
  * a Timeout/Abort DOMException when the request deadline passes. */
 function isQualificationNetworkError(error: unknown): boolean {
@@ -576,6 +559,66 @@ function isValidToolArguments(value: string | undefined): boolean {
     return Boolean(args) && typeof args === 'object' && !Array.isArray(args);
   } catch {
     return false;
+  }
+}
+
+const OPENAI_COMPATIBLE_PROTOCOL_ROUTES = {
+  'chat-completions': {
+    path: '/v1/chat/completions',
+    label: 'Chat Completions',
+  },
+  responses: { path: '/v1/responses', label: 'Responses API' },
+} as const satisfies Record<
+  OpenAiCompatibleProtocol,
+  { path: string; label: string }
+>;
+
+/**
+ * Checks, without needing a model, whether the endpoint serves the selected
+ * protocol's route. An empty request fails validation on a server that
+ * implements the route and returns 404/405 on one that does not; any other
+ * outcome (auth, network, timeout) is inconclusive and reports nothing.
+ */
+export async function getOpenAiCompatibleProtocolWarning(
+  input: { provider: LocalTaskModelProviderId } & LocalProviderConnectionInput,
+): Promise<string | null> {
+  if (!getOpenAiCompatibleProviderInstance(input.provider)) return null;
+  try {
+    const connection = await resolveLocalProviderConnection(
+      input.provider,
+      input,
+    );
+    if (!connection) return null;
+    const selected = resolveOpenAiCompatibleProtocol(connection.protocol);
+    const isMissing = async (protocol: OpenAiCompatibleProtocol) => {
+      const response = await fetch(
+        getLocalProviderBaseUrl(
+          connection.baseUrl,
+          OPENAI_COMPATIBLE_PROTOCOL_ROUTES[protocol].path,
+        ),
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...buildLocalProviderHeaders(connection),
+          },
+          body: '{}',
+          signal: AbortSignal.timeout(LOCAL_PROVIDER_REQUEST_TIMEOUT_MS),
+        },
+      );
+      await response.body?.cancel();
+      return response.status === 404 || response.status === 405;
+    };
+    if (!(await isMissing(selected))) return null;
+    const other: OpenAiCompatibleProtocol =
+      selected === 'responses' ? 'chat-completions' : 'responses';
+    const { path, label } = OPENAI_COMPATIBLE_PROTOCOL_ROUTES[selected];
+    const suggestion = (await isMissing(other).catch(() => true))
+      ? ''
+      : ` It does serve ${OPENAI_COMPATIBLE_PROTOCOL_ROUTES[other].label}; switch the API protocol if tasks fail.`;
+    return `This endpoint does not appear to serve ${label} (${path} was not found).${suggestion}`;
+  } catch {
+    return null;
   }
 }
 
@@ -816,7 +859,16 @@ export async function qualifyProviderModel(
           messages: [{ role: 'user', content: 'Reply with pong.' }],
           stream: true,
           tool_choice: 'required',
-          tools: CHAT_COMPLETIONS_PING_TOOLS,
+          tools: [
+            {
+              type: 'function',
+              function: {
+                name: 'ping',
+                description: 'Returns a short health-check response.',
+                parameters: { type: 'object', properties: {} },
+              },
+            },
+          ],
         }),
         signal: AbortSignal.timeout(LOCAL_PROVIDER_REQUEST_TIMEOUT_MS),
       },
@@ -828,16 +880,8 @@ export async function qualifyProviderModel(
       };
     }
 
-    const initialEvents = await readQualificationEvents(response);
-    const toolCalls = new Map<
-      string,
-      {
-        id: string;
-        type: 'function';
-        function: { name: string; arguments: string };
-      }
-    >();
-    for (const event of initialEvents) {
+    const toolNames = new Map<string, string>();
+    for (const event of await readQualificationEvents(response)) {
       const chunk = qualificationChunkSchema.safeParse(event);
       if (!chunk.success) continue;
 
@@ -845,116 +889,19 @@ export async function qualifyProviderModel(
         choice.delta.tool_calls?.forEach((call, callOffset) => {
           const key = `${choice.index ?? choiceOffset}:${call.index ?? callOffset}`;
           // Function names may arrive in fragments across streamed deltas.
-          const previous = toolCalls.get(key) ?? {
-            id: '',
-            type: 'function' as const,
-            function: { name: '', arguments: '' },
-          };
-          toolCalls.set(key, {
-            ...previous,
-            // IDs are not fragmented, and some servers repeat them per delta.
-            id: previous.id || (call.id ?? ''),
-            function: {
-              name: previous.function.name + (call.function?.name ?? ''),
-              arguments:
-                previous.function.arguments + (call.function?.arguments ?? ''),
-            },
-          });
+          toolNames.set(
+            key,
+            (toolNames.get(key) ?? '') + (call.function?.name ?? ''),
+          );
         });
       });
     }
 
-    // Normalize what servers legitimately omit: a missing call ID (the runtime
-    // SDK generates one too) and empty arguments for a parameterless tool.
-    const calls = [...toolCalls.values()].map((call, index) => ({
-      ...call,
-      id: call.id || `call_${index}`,
-    }));
-    if (!calls.length || calls.some((call) => call.function.name !== 'ping')) {
+    if (![...toolNames.values()].includes('ping')) {
       return {
         success: false,
         error:
           'The model streamed a response but did not call the required tool. Choose a model with OpenAI-compatible tool calling.',
-      };
-    }
-    if (calls.some((call) => !isValidToolArguments(call.function.arguments))) {
-      return {
-        success: false,
-        error: 'The model returned invalid tool arguments.',
-      };
-    }
-    const continuation = await fetch(
-      getLocalProviderBaseUrl(connection.baseUrl, '/v1/chat/completions'),
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...buildLocalProviderHeaders(connection),
-        },
-        body: JSON.stringify({
-          model: modelId.replace(`${input.provider}/`, ''),
-          stream: true,
-          messages: [
-            { role: 'user', content: 'Reply with pong.' },
-            {
-              role: 'assistant',
-              content: null,
-              tool_calls: calls.map((call) => ({
-                ...call,
-                function: {
-                  ...call.function,
-                  arguments: call.function.arguments.trim() || '{}',
-                },
-              })),
-            },
-            ...calls.map((call) => ({
-              role: 'tool',
-              tool_call_id: call.id,
-              content: 'pong',
-            })),
-          ],
-          // Several gateways reject tool-call history sent without tools.
-          tools: CHAT_COMPLETIONS_PING_TOOLS,
-        }),
-        signal: AbortSignal.timeout(LOCAL_PROVIDER_REQUEST_TIMEOUT_MS),
-      },
-    );
-    if (!continuation.ok)
-      return {
-        success: false,
-        error: await getQualificationError(input.provider, continuation),
-      };
-    const events = await readQualificationEvents(continuation);
-    const completion = z.object({
-      choices: z.array(
-        z.object({
-          delta: z.object({
-            content: z.string().nullable().optional(),
-            tool_calls: z.array(z.unknown()).optional(),
-          }),
-        }),
-      ),
-    });
-    const choices = events.flatMap((event) => {
-      const parsed = completion.safeParse(event);
-      return parsed.success ? parsed.data.choices : [];
-    });
-    if (
-      events.some(
-        (event) =>
-          typeof event === 'object' && event !== null && 'error' in event,
-      ) ||
-      // The endpoint accepted the tool output if the model kept going, whether
-      // with text or another call; finish reasons vary too much to require.
-      !choices.some(
-        (choice) =>
-          choice.delta.content?.trim() || choice.delta.tool_calls?.length,
-      )
-    ) {
-      return {
-        success: false,
-        error:
-          'The provider did not continue the response after receiving the tool output.',
       };
     }
     return { success: true };

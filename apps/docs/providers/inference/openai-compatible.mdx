@@ -81,9 +81,14 @@ do not need direct network access to the endpoint or the API key.
 5. check the upstream server logs for the request
 
 Model discovery calls `/v1/models` regardless of protocol. A successful listing
-does not verify inference compatibility. The model tool-call check uses the saved
-protocol, receives a streamed function call, sends its tool output, and verifies
-a completed streamed reply. For Responses, the endpoint must accept
+does not verify inference compatibility. When you save a connection, Roomote
+also checks that the endpoint serves the selected protocol's route and warns if
+it does not.
+
+First-run setup additionally runs a model tool-call check with the selected
+protocol. For Chat Completions it verifies a streamed function call. For
+Responses it verifies a streamed function call, sends its tool output, and
+verifies a completed streamed reply: the endpoint must accept
 `function_call_output` with the original call ID and conversation history
 (`store: false`); server-side response storage is not required.
 

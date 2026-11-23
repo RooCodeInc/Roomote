@@ -5,6 +5,7 @@ import {
   discoverProviderModels,
   getRecommendedLocalProviderModels,
   LOCAL_TASK_MODEL_PROVIDER_IDS,
+  getOpenAiCompatibleProtocolWarning,
   qualifyProviderModel,
 } from './local-provider-discovery';
 
@@ -449,47 +450,60 @@ describe('qualifyProviderModel', () => {
     },
   );
 
-  it('tolerates repeated call IDs, empty arguments, and a continuation without a stop reason', async () => {
-    fetchMock.mockResolvedValueOnce(
-      new Response(
-        [
-          'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_ping","function":{"name":"ping","arguments":""}}]}}]}\n\n',
-          'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_ping","function":{"arguments":""}}]}}]}\n\n',
-        ].join(''),
-        { headers: { 'content-type': 'text/event-stream' } },
-      ),
-    );
-    fetchMock.mockResolvedValueOnce(
-      new Response('data: {"choices":[{"delta":{"content":"pong"}}]}\n\n', {
-        headers: { 'content-type': 'text/event-stream' },
-      }),
-    );
+  it.each([
+    {
+      selected: 404,
+      other: 400,
+      expected:
+        /does not appear to serve Responses API.*does serve Chat Completions/,
+    },
+    {
+      selected: 405,
+      other: 404,
+      expected:
+        /does not appear to serve Responses API \(\/v1\/responses was not found\)\.$/,
+    },
+    { selected: 400, other: 404, expected: null },
+    { selected: 401, other: 404, expected: null },
+  ])(
+    'warns only when the selected protocol route is missing: $selected/$other',
+    async ({ selected, other, expected }) => {
+      fetchMock.mockImplementation(
+        async (url: string) =>
+          new Response('{}', {
+            status: url.endsWith('/v1/responses') ? selected : other,
+          }),
+      );
 
+      const warning = await getOpenAiCompatibleProtocolWarning({
+        provider: 'openai-compatible-native',
+        baseUrl: 'https://gateway.example/v1',
+        protocol: 'responses',
+      });
+      if (expected) expect(warning).toMatch(expected);
+      else expect(warning).toBeNull();
+      expect(fetchMock).toHaveBeenCalledWith(
+        'https://gateway.example/v1/responses',
+        expect.objectContaining({ method: 'POST', body: '{}' }),
+      );
+    },
+  );
+
+  it('skips the protocol check for providers without a protocol choice or when unreachable', async () => {
     await expect(
-      qualifyProviderModel({
-        provider: 'litellm',
-        baseUrl: 'https://litellm.example/v1',
-        modelId: 'litellm/claude',
+      getOpenAiCompatibleProtocolWarning({
+        provider: 'vllm',
+        baseUrl: 'https://vllm.example/v1',
       }),
-    ).resolves.toEqual({ success: true });
-    const continuation = JSON.parse(
-      (fetchMock.mock.calls[1] as [string, RequestInit])[1].body as string,
-    );
-    expect(continuation.tools).toHaveLength(1);
-    expect(continuation.messages.slice(1)).toEqual([
-      {
-        role: 'assistant',
-        content: null,
-        tool_calls: [
-          {
-            id: 'call_ping',
-            type: 'function',
-            function: { name: 'ping', arguments: '{}' },
-          },
-        ],
-      },
-      { role: 'tool', tool_call_id: 'call_ping', content: 'pong' },
-    ]);
+    ).resolves.toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+    fetchMock.mockRejectedValue(new TypeError('fetch failed'));
+    await expect(
+      getOpenAiCompatibleProtocolWarning({
+        provider: 'openai-compatible',
+        baseUrl: 'https://gateway.example/v1',
+      }),
+    ).resolves.toBeNull();
   });
 
   it('reports an invalid saved protocol without throwing or sending a request', async () => {
@@ -512,19 +526,12 @@ describe('qualifyProviderModel', () => {
   });
 
   it('qualifies a provider model with a streaming tool request', async () => {
-    fetchMock.mockResolvedValueOnce(
+    fetchMock.mockResolvedValue(
       new Response(
-        'data: {"choices":[{"delta":{"tool_calls":[{"id":"call_ping","function":{"name":"ping","arguments":"{}"}}]}}]}\n\n',
+        'data: {"choices":[{"delta":{"tool_calls":[{"function":{"name":"ping"}}]}}]}\n\n',
         {
           headers: { 'content-type': 'text/event-stream' },
         },
-      ),
-    );
-
-    fetchMock.mockResolvedValueOnce(
-      new Response(
-        'data: {"choices":[{"delta":{"content":"pong"},"finish_reason":"stop"}]}\n\n',
-        { headers: { 'content-type': 'text/event-stream' } },
       ),
     );
 
@@ -622,20 +629,14 @@ describe('qualifyProviderModel', () => {
         requestBody += chunk;
       });
       request.on('end', () => {
-        const parsed = JSON.parse(requestBody);
         requests.push({
           url: request.url,
           method: request.method,
           body: JSON.parse(requestBody),
         });
         response.writeHead(200, { 'content-type': 'text/event-stream' });
-        const stream = parsed.messages?.some(
-          (message: { role: string }) => message.role === 'tool',
-        )
-          ? 'data: {"choices":[{"delta":{"content":"pong"},"finish_reason":"stop"}]}\r\n\r\n'
-          : body;
-        response.write(stream.slice(0, 17));
-        setImmediate(() => response.end(stream.slice(17)));
+        response.write(body.slice(0, 17));
+        setImmediate(() => response.end(body.slice(17)));
       });
     });
     server.listen(0, '127.0.0.1');
@@ -654,7 +655,7 @@ describe('qualifyProviderModel', () => {
       await expect(qualify()).resolves.toMatchObject({ success: false });
       body = [
         ': keepalive\r\n\r\n',
-        'data: {"choices":[\r\ndata: {"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_ping","function":{"name":"pi","arguments":"{}"}}]}}]}\r\n\r\n',
+        'data: {"choices":[\r\ndata: {"index":0,"delta":{"tool_calls":[{"index":0,"function":{"name":"pi"}}]}}]}\r\n\r\n',
         'data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"name":"ng"}}]}}]}\r\n\r\n',
         'data: [DONE]\r\n\r\n',
       ].join('');
@@ -669,15 +670,6 @@ describe('qualifyProviderModel', () => {
           url: '/v1/chat/completions',
           method: 'POST',
           body: expect.objectContaining({ tool_choice: 'required' }),
-        },
-        {
-          url: '/v1/chat/completions',
-          method: 'POST',
-          body: expect.objectContaining({
-            messages: expect.arrayContaining([
-              { role: 'tool', tool_call_id: 'call_ping', content: 'pong' },
-            ]),
-          }),
         },
       ]);
     } finally {
