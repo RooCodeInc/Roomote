@@ -3807,7 +3807,7 @@ export function AutomationsSettings({
                     details={automationUi.details}
                     frequency={frequency}
                     isEnabled={isEnabled}
-                    disabled={false}
+                    disabled={isAutomationSaving(automation.id)}
                     fieldId={fieldId}
                     onFrequencyChange={(nextFrequency) =>
                       setScheduleOnlyAutomationFrequency(
@@ -4111,7 +4111,7 @@ export function AutomationsSettings({
                     details={automationUi.details}
                     frequency={frequency}
                     isEnabled={isEnabled}
-                    disabled={false}
+                    disabled={isAutomationSaving(automation.id)}
                     fieldId={fieldId}
                     onFrequencyChange={(nextFrequency) =>
                       setScheduleOnlyAutomationFrequency(
@@ -4439,7 +4439,7 @@ export function AutomationsSettings({
                     details={automationUi.details}
                     frequency={frequency}
                     isEnabled={isEnabled}
-                    disabled={false}
+                    disabled={isAutomationSaving(automation.id)}
                     fieldId={fieldId}
                     onFrequencyChange={(nextFrequency) =>
                       setScheduleOnlyAutomationFrequency(
