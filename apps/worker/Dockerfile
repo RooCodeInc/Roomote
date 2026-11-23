@@ -92,7 +92,7 @@ RUN sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && locale-gen
 
 # Install gh cli
 RUN ARCH="$(dpkg --print-architecture)" \
-  && curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${ARCH}.tar.gz" -o /tmp/gh.tar.gz \
+  && curl -fsSL --retry 3 --retry-delay 2 --retry-max-time 120 --connect-timeout 15 --max-time 60 "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${ARCH}.tar.gz" -o /tmp/gh.tar.gz \
   && tar -xzf /tmp/gh.tar.gz -C /tmp \
   && mv "/tmp/gh_${GH_VERSION}_linux_${ARCH}/bin/gh" /usr/local/bin/ \
   && rm -rf /tmp/gh.tar.gz /tmp/gh_${GH_VERSION}_linux_*
