@@ -4,7 +4,6 @@ import {
   isOpenAiCompatibleProviderId,
   listOpenAiCompatibleProviderInstancesFromEnvNames,
   OPENAI_COMPATIBLE_PROVIDER_ID,
-  resolveOpenAiCompatibleProtocol,
   type OpenAiCompatibleProviderInstance,
 } from './openai-compatible-providers';
 import { ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME } from './model-provider-config';
@@ -267,11 +266,13 @@ export function mergeOpenAiCompatibleProviderConfig(
 
     const existingProvider = asRecord(merged[providerId]);
     const instance = getOpenAiCompatibleProviderInstance(providerId);
+    // Saving and qualification reject an unrecognized protocol. At run time it
+    // falls back to the default instead of throwing: this config is generated
+    // for every task, so one mistyped variable must not stop unrelated models.
     const responses =
       instance &&
-      resolveOpenAiCompatibleProtocol(
-        runtimeEnv[instance.protocolEnvVarName],
-      ) === 'responses';
+      runtimeEnv[instance.protocolEnvVarName]?.trim().toLowerCase() ===
+        'responses';
     const existingOptions = asRecord(existingProvider.options);
     const existingModels = asRecord(existingProvider.models);
     const directApiKey = provider.apiKeyEnvVarName

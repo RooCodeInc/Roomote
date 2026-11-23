@@ -38,14 +38,20 @@ describe('mergeOpenAiCompatibleProviderConfig', () => {
     });
   });
 
-  it('rejects an invalid protocol instead of silently changing transport', () => {
-    expect(() =>
+  it('keeps generating config with the default transport when a protocol value is unrecognized', () => {
+    expect(
       mergeOpenAiCompatibleProviderConfig(
         {},
-        { OPENAI_COMPATIBLE_PROTOCOL: 'invalid' },
-        ['openai-compatible/model'],
+        {
+          OPENAI_COMPATIBLE_PROTOCOL: 'invalid',
+          OPENAI_COMPATIBLE_NATIVE_PROTOCOL: ' Responses ',
+        },
+        ['openai-compatible/model', 'openai-compatible-native/model'],
       ),
-    ).toThrow('API protocol');
+    ).toMatchObject({
+      'openai-compatible': { npm: '@ai-sdk/openai-compatible' },
+      'openai-compatible-native': { npm: '@ai-sdk/openai' },
+    });
   });
   it('materializes managed Roomote models as an isolated OpenAI-compatible provider', () => {
     expect(

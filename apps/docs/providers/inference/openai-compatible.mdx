@@ -50,7 +50,8 @@ For a Responses connection, also set
 `OPENAI_COMPATIBLE_COMPANY_PROXY_PROTOCOL=responses`. For the legacy default
 connection, use `OPENAI_COMPATIBLE_PROTOCOL` alongside the existing base URL and
 optional key. Accepted values are `chat-completions` and `responses`; an omitted
-value uses Chat Completions.
+value uses Chat Completions. Settings and the model tool-call check reject any
+other value, and tasks treat it as Chat Completions.
 
 ## When to use this versus LiteLLM, Ollama, or vLLM
 
