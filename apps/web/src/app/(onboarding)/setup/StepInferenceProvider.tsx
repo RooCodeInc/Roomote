@@ -15,6 +15,7 @@ import {
   XAI_SUBSCRIPTION_PROVIDER_ID,
   OPENAI_COMPATIBLE_PROVIDER_ID,
   getDefaultAdditionalEnvValues,
+  getOpenAiCompatibleProviderInstance,
   getSetupModelProvider,
   resolveOpenAiCompatibleProtocol,
   type SetupModelProviderId,
@@ -162,6 +163,13 @@ export function StepInferenceProvider({
     trpc.taskModels.qualifyProviderModel.mutationOptions(),
   );
 
+  // Latest status for the selection effect below, which must stay keyed on
+  // `selectedProvider` alone so a status refetch never resets in-progress input.
+  const modelSetupRef = useRef(modelSetup);
+  useEffect(() => {
+    modelSetupRef.current = modelSetup;
+  }, [modelSetup]);
+
   useEffect(() => {
     setApiKey(
       selectedProvider === 'ollama'
@@ -171,14 +179,22 @@ export function StepInferenceProvider({
           : '',
     );
     setConnectionName('');
-    // Seeded from the catalog rather than the fetched status so this effect
-    // stays keyed on `selectedProvider` alone; depending on the status query
-    // would reset in-progress input on every refetch.
+    // Option fields always submit a value, so start them from what an existing
+    // connection already saved; catalog defaults would overwrite it on Continue.
+    const fields = selectedProvider
+      ? (getSetupModelProvider(selectedProvider).additionalEnvFields ?? [])
+      : [];
+    const savedValues =
+      getProviderStatus(modelSetupRef.current, selectedProvider)
+        ?.additionalEnvValues ?? {};
     setAdditionalEnvValues(
       getDefaultAdditionalEnvValues(
-        selectedProvider
-          ? (getSetupModelProvider(selectedProvider).additionalEnvFields ?? [])
-          : [],
+        fields,
+        Object.fromEntries(
+          fields
+            .filter((field) => field.options && savedValues[field.envVarName])
+            .map((field) => [field.envVarName, savedValues[field.envVarName]!]),
+        ),
       ),
     );
     setEditingSavedValue(false);
@@ -311,13 +327,15 @@ export function StepInferenceProvider({
         return;
       }
 
+      const protocolEnvVarName =
+        getOpenAiCompatibleProviderInstance(provider)?.protocolEnvVarName;
       for (const candidate of discovery.recommendedModels) {
         const result = await qualifyProviderModel.mutateAsync({
           provider,
           modelId: candidate.modelId,
-          ...(provider === OPENAI_COMPATIBLE_PROVIDER_ID && {
+          ...(protocolEnvVarName && {
             protocol: resolveOpenAiCompatibleProtocol(
-              additionalEnvValues.OPENAI_COMPATIBLE_PROTOCOL,
+              additionalEnvValues[protocolEnvVarName],
             ),
           }),
           baseUrl: connection.baseUrl,

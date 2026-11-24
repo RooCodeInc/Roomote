@@ -535,6 +535,74 @@ describe('StepInferenceProvider configured API key display', () => {
     },
   );
 
+  it.each([
+    { saved: 'responses', selected: undefined, expected: 'responses' },
+    { saved: undefined, selected: 'responses', expected: 'responses' },
+    {
+      saved: 'responses',
+      selected: 'chat-completions',
+      expected: 'chat-completions',
+    },
+  ])(
+    'keeps the saved protocol of an existing named endpoint (saved $saved, selected $selected)',
+    async ({ saved, selected, expected }) => {
+      mutateAsyncMock
+        .mockResolvedValueOnce({
+          error: null,
+          modelCount: 1,
+          recommendedModels: [{ modelId: 'openai-compatible-native/qwen3:8b' }],
+        })
+        .mockResolvedValueOnce({ success: true })
+        .mockResolvedValueOnce(undefined);
+      const provider = {
+        ...getSetupModelProvider('openai-compatible-native'),
+        runtimeApiKeySatisfied: false,
+        savedApiKeySatisfied: true,
+        additionalEnvValues: {
+          OPENAI_COMPATIBLE_NATIVE_BASE_URL: 'https://gateway.example/v1',
+          ...(saved && { OPENAI_COMPATIBLE_NATIVE_PROTOCOL: saved }),
+        },
+      };
+      render(
+        <StepInferenceProvider
+          modelSetup={buildModelSetup({ providers: [provider] })}
+          onContinue={vi.fn()}
+        />,
+      );
+      selectProvider('openai-compatible-native');
+      const protocolSelect = screen
+        .getAllByRole('combobox')
+        .find((element) => element.querySelector('option[value="responses"]'))!;
+      expect(protocolSelect).toHaveValue(saved ?? 'chat-completions');
+      if (selected)
+        fireEvent.change(protocolSelect, { target: { value: selected } });
+      for (const input of screen.getAllByLabelText(/^Connection name/)) {
+        fireEvent.change(input, { target: { value: 'Native' } });
+      }
+      fireEvent.change(screen.getByPlaceholderText(/Endpoint URL/i), {
+        target: { value: 'https://gateway.example/v1' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: /continue/i }));
+      await waitFor(() => expect(mutateAsyncMock).toHaveBeenCalledTimes(3));
+      expect(mutateAsyncMock).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          provider: 'openai-compatible-native',
+          protocol: expected,
+        }),
+      );
+      expect(mutateAsyncMock).toHaveBeenNthCalledWith(
+        3,
+        expect.objectContaining({
+          provider: 'openai-compatible-native',
+          additionalEnvValues: expect.objectContaining({
+            OPENAI_COMPATIBLE_NATIVE_PROTOCOL: expected,
+          }),
+        }),
+      );
+    },
+  );
+
   it('explains the minimum model requirements when no local model is eligible', async () => {
     mutateAsyncMock.mockResolvedValueOnce({
       error: null,
