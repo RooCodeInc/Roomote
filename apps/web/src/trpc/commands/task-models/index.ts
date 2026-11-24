@@ -26,6 +26,7 @@ import {
   OPENAI_COMPATIBLE_PROTOCOL_OPTIONS,
   buildOpenAiCompatibleProviderId,
   buildOpenAiCompatibleProviderInstance,
+  remapOpenAiCompatibleAdditionalEnvValues,
   buildRecommendedDeploymentModelConfig,
   buildSetupModelStatus,
   buildTaskModelOption,
@@ -679,31 +680,12 @@ export async function saveTaskModelProviderCommand(
         const instance = buildOpenAiCompatibleProviderInstance(slug, {
           label: input.connectionName?.trim() || slug,
         });
-        // Remap values submitted against the catalog template env names onto
-        // the named instance env vars.
-        const template = getSetupModelProvider(OPENAI_COMPATIBLE_PROVIDER_ID);
-        const remappedAdditional: Record<string, string> = {};
-        if (instance.labelEnvVarName && input.connectionName?.trim()) {
-          remappedAdditional[instance.labelEnvVarName] =
-            input.connectionName.trim();
-        }
-        for (const [name, value] of Object.entries(
-          input.additionalEnvValues ?? {},
-        )) {
-          if (name === 'OPENAI_COMPATIBLE_PROTOCOL') {
-            remappedAdditional[instance.protocolEnvVarName] = value;
-            continue;
-          }
-          if (name === 'OPENAI_COMPATIBLE_API_KEY') {
-            remappedAdditional[instance.apiKeyEnvVarName] = value;
-            continue;
-          }
-          if (template.envVarName && name === template.envVarName) {
-            continue;
-          }
-          remappedAdditional[name] = value;
-        }
-        suppliedAdditionalEnvValues = remappedAdditional;
+        suppliedAdditionalEnvValues = remapOpenAiCompatibleAdditionalEnvValues({
+          instance,
+          connectionName: input.connectionName,
+          additionalEnvValues: input.additionalEnvValues,
+          templateBaseUrl: 'omit',
+        });
       } else if (input.connectionName?.trim()) {
         throw new Error(
           'Enter a valid connection name for the OpenAI-compatible endpoint.',

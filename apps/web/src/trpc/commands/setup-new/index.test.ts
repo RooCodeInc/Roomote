@@ -398,6 +398,59 @@ describe('setup-new named endpoint protocol save', () => {
     });
   });
 
+  it('requires a name when onboarding from the template', async () => {
+    await expect(
+      saveSetupNewModelConfigCommand(buildMockAuth(), {
+        provider: 'openai-compatible',
+        apiKey: 'https://gateway.example/v1',
+        modelId: 'openai-compatible/qwen3:8b',
+      }),
+    ).rejects.toThrow('Enter a connection name');
+  });
+
+  it('keeps an already-named onboarding connection and its submitted fields unchanged', async () => {
+    const additionalEnvValues = {
+      OPENAI_COMPATIBLE_NATIVE_PROTOCOL: 'responses',
+      OPENAI_COMPATIBLE_NATIVE_API_KEY: 'endpoint-key',
+    };
+    const result = await saveSetupNewModelConfigCommand(buildMockAuth(), {
+      provider: 'openai-compatible-native',
+      connectionName: 'Another name',
+      apiKey: 'https://gateway.example/v1',
+      additionalEnvValues,
+      modelId: 'openai-compatible-native/qwen3:8b',
+    });
+    expect(result.runtimeModelConfig.roomoteModel).toBe(
+      'openai-compatible-native/qwen3:8b',
+    );
+    expect(mockValidateSetupModelProviderCredentials).toHaveBeenCalledWith(
+      expect.objectContaining({ additionalEnvValues }),
+    );
+    expect(mockUpsertDeploymentEnvironmentVariables).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        values: expect.arrayContaining([
+          { name: 'OPENAI_COMPATIBLE_NATIVE_API_KEY', value: 'endpoint-key' },
+        ]),
+      }),
+    );
+  });
+
+  it('preserves duplicate template URLs for downstream rejection during onboarding', async () => {
+    await expect(
+      saveSetupNewModelConfigCommand(buildMockAuth(), {
+        provider: 'openai-compatible',
+        connectionName: 'Native',
+        apiKey: 'https://gateway.example/v1',
+        additionalEnvValues: {
+          OPENAI_COMPATIBLE_BASE_URL: 'https://duplicate.example/v1',
+        },
+        modelId: 'openai-compatible/qwen3:8b',
+      }),
+    ).rejects.toThrow('does not accept a OPENAI_COMPATIBLE_BASE_URL value');
+    expect(mockUpsertDeploymentEnvironmentVariables).not.toHaveBeenCalled();
+  });
+
   it.each(['chat-completions', 'responses'])(
     'saves the wizard protocol %s under the named connection without changing its model ID',
     async (protocol) => {

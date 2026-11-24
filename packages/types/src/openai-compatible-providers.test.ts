@@ -12,6 +12,7 @@ import {
   parseOpenAiCompatibleBaseUrlEnvVarName,
   resolveOpenAiCompatibleProtocol,
   getOpenAiCompatibleProviderEnvVarNames,
+  remapOpenAiCompatibleAdditionalEnvValues,
 } from './openai-compatible-providers';
 import {
   collectSetupModelProviderCredentialValues,
@@ -20,6 +21,104 @@ import {
 } from './model-provider-config';
 
 describe('openai-compatible multiple connections', () => {
+  describe('template additional-value translation', () => {
+    const instance = buildOpenAiCompatibleProviderInstance('company-proxy');
+
+    it.each(['chat-completions', 'responses'])(
+      'maps %s and the optional key without changing submitted values',
+      (protocol) => {
+        const additionalEnvValues = Object.freeze({
+          OPENAI_COMPATIBLE_PROTOCOL: protocol,
+          OPENAI_COMPATIBLE_API_KEY: ' key-with-whitespace ',
+          UNRELATED_VALUE: 'unchanged',
+        });
+        expect(
+          remapOpenAiCompatibleAdditionalEnvValues({
+            instance,
+            connectionName: ' Company Proxy ',
+            additionalEnvValues,
+            templateBaseUrl: 'preserve',
+          }),
+        ).toEqual({
+          OPENAI_COMPATIBLE_COMPANY_PROXY_LABEL: 'Company Proxy',
+          OPENAI_COMPATIBLE_COMPANY_PROXY_PROTOCOL: protocol,
+          OPENAI_COMPATIBLE_COMPANY_PROXY_API_KEY: ' key-with-whitespace ',
+          UNRELATED_VALUE: 'unchanged',
+        });
+      },
+    );
+
+    it('distinguishes omitted and explicitly cleared keys', () => {
+      const options = { instance, templateBaseUrl: 'omit' as const };
+      expect(remapOpenAiCompatibleAdditionalEnvValues(options)).toEqual({});
+      expect(
+        remapOpenAiCompatibleAdditionalEnvValues({
+          ...options,
+          additionalEnvValues: { OPENAI_COMPATIBLE_API_KEY: '' },
+        }),
+      ).toEqual({ OPENAI_COMPATIBLE_COMPANY_PROXY_API_KEY: '' });
+    });
+
+    it.each(['preserve', 'omit'] as const)(
+      'keeps the caller-owned %s policy for a duplicate template URL',
+      (templateBaseUrl) => {
+        const values = remapOpenAiCompatibleAdditionalEnvValues({
+          instance,
+          templateBaseUrl,
+          additionalEnvValues: {
+            OPENAI_COMPATIBLE_BASE_URL: 'https://duplicate.example/v1',
+            OPENAI_COMPATIBLE_COMPANY_PROXY_BASE_URL:
+              'https://named.example/v1',
+          },
+        });
+        expect(values).toEqual({
+          ...(templateBaseUrl === 'preserve'
+            ? { OPENAI_COMPATIBLE_BASE_URL: 'https://duplicate.example/v1' }
+            : {}),
+          OPENAI_COMPATIBLE_COMPANY_PROXY_BASE_URL: 'https://named.example/v1',
+        });
+        const collect = () =>
+          collectSetupModelProviderCredentialValues({
+            provider: getSetupModelProvider(instance.id),
+            apiKey: 'https://primary.example/v1',
+            additionalEnvValues: values,
+            isEnvVarSatisfied: () => false,
+            action: 'save it',
+          });
+        if (templateBaseUrl === 'preserve') {
+          expect(collect).toThrow(
+            'does not accept a OPENAI_COMPATIBLE_BASE_URL value',
+          );
+        } else {
+          expect(collect().values).toEqual([
+            {
+              name: instance.baseUrlEnvVarName,
+              value: 'https://primary.example/v1',
+            },
+          ]);
+        }
+      },
+    );
+
+    it('retains named fields and their insertion-order precedence over injected values', () => {
+      expect(
+        remapOpenAiCompatibleAdditionalEnvValues({
+          instance,
+          connectionName: 'Company Proxy',
+          templateBaseUrl: 'omit',
+          additionalEnvValues: {
+            OPENAI_COMPATIBLE_API_KEY: 'template-key',
+            OPENAI_COMPATIBLE_COMPANY_PROXY_API_KEY: 'named-key',
+            OPENAI_COMPATIBLE_COMPANY_PROXY_LABEL: 'Submitted label',
+          },
+        }),
+      ).toEqual({
+        OPENAI_COMPATIBLE_COMPANY_PROXY_LABEL: 'Submitted label',
+        OPENAI_COMPATIBLE_COMPANY_PROXY_API_KEY: 'named-key',
+      });
+    });
+  });
+
   it('defaults legacy connections and keeps named save/read/delete configuration isolated', () => {
     expect(resolveOpenAiCompatibleProtocol(undefined)).toBe('chat-completions');
     const provider = getSetupModelProvider('openai-compatible-native');
