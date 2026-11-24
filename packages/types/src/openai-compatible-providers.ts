@@ -306,6 +306,51 @@ export function getOpenAiCompatibleProviderInstance(
 }
 
 /**
+ * Translate catalog-template additional values onto a connection's env names.
+ * The primary URL is supplied separately by callers; preserve or omit a duplicate
+ * template URL explicitly so each save surface keeps its validation contract.
+ * Unknown values pass through for downstream credential validation to reject.
+ */
+export function remapOpenAiCompatibleAdditionalEnvValues(options: {
+  instance: OpenAiCompatibleProviderInstance;
+  additionalEnvValues?: Readonly<Record<string, string>>;
+  connectionName?: string;
+  templateBaseUrl: 'preserve' | 'omit';
+}): Record<string, string> {
+  const template = buildOpenAiCompatibleProviderInstance(null);
+  const envNames = new Map<string, string>();
+  for (const [field, templateName] of Object.entries(template)) {
+    const instanceName =
+      options.instance[field as keyof OpenAiCompatibleProviderInstance];
+    if (
+      field.endsWith('EnvVarName') &&
+      field !== 'baseUrlEnvVarName' &&
+      typeof templateName === 'string' &&
+      typeof instanceName === 'string'
+    ) {
+      envNames.set(templateName, instanceName);
+    }
+  }
+
+  const values: Record<string, string> = {};
+  if (options.instance.labelEnvVarName && options.connectionName?.trim()) {
+    values[options.instance.labelEnvVarName] = options.connectionName.trim();
+  }
+  for (const [name, value] of Object.entries(
+    options.additionalEnvValues ?? {},
+  )) {
+    if (
+      name === template.baseUrlEnvVarName &&
+      options.templateBaseUrl === 'omit'
+    ) {
+      continue;
+    }
+    values[envNames.get(name) ?? name] = value;
+  }
+  return values;
+}
+
+/**
  * Parse a deployment env var name into an OpenAI-compatible instance when it
  * is a BASE_URL credential for either the default or a named connection.
  */

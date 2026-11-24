@@ -2209,6 +2209,84 @@ describe('task model provider commands', () => {
     });
   });
 
+  it.each(['chat-completions', 'responses'])(
+    'saves a new named connection using %s while ignoring a duplicate template URL',
+    async (protocol) => {
+      fetchMock.mockResolvedValue(new Response(null, { status: 503 }));
+      await saveTaskModelProviderCommand(buildMockAuth(), {
+        provider: 'openai-compatible',
+        connectionName: ' Native ',
+        apiKey: 'https://gateway.example/v1',
+        additionalEnvValues: {
+          OPENAI_COMPATIBLE_PROTOCOL: protocol,
+          OPENAI_COMPATIBLE_API_KEY: 'endpoint-key',
+          OPENAI_COMPATIBLE_BASE_URL: 'https://duplicate.example/v1',
+        },
+      });
+      expect(mockCollectCandidateProviderCredentials).toHaveBeenCalledWith(
+        expect.objectContaining({
+          provider: expect.objectContaining({ id: 'openai-compatible-native' }),
+          additionalEnvValues: {
+            OPENAI_COMPATIBLE_NATIVE_LABEL: 'Native',
+            OPENAI_COMPATIBLE_NATIVE_PROTOCOL: protocol,
+            OPENAI_COMPATIBLE_NATIVE_API_KEY: 'endpoint-key',
+          },
+        }),
+      );
+      expect(mockUpsertDeploymentEnvironmentVariables).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          values: expect.arrayContaining([
+            {
+              name: 'OPENAI_COMPATIBLE_NATIVE_BASE_URL',
+              value: 'https://gateway.example/v1',
+            },
+            { name: 'OPENAI_COMPATIBLE_NATIVE_PROTOCOL', value: protocol },
+            { name: 'OPENAI_COMPATIBLE_NATIVE_API_KEY', value: 'endpoint-key' },
+            { name: 'OPENAI_COMPATIBLE_NATIVE_LABEL', value: 'Native' },
+          ]),
+        }),
+      );
+    },
+  );
+
+  it.each([
+    ['openai-compatible', 'OPENAI_COMPATIBLE', undefined],
+    ['openai-compatible-native', 'OPENAI_COMPATIBLE_NATIVE', 'Renamed label'],
+  ] as const)(
+    'keeps the existing %s identity on edit and clears its optional key',
+    async (provider, prefix, connectionName) => {
+      mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
+        `${prefix}_BASE_URL`,
+        `${prefix}_API_KEY`,
+      ]);
+      fetchMock.mockResolvedValue(new Response(null, { status: 503 }));
+      await saveTaskModelProviderCommand(buildMockAuth(), {
+        provider,
+        connectionName,
+        additionalEnvValues: {
+          [`${prefix}_PROTOCOL`]: 'responses',
+          [`${prefix}_API_KEY`]: '',
+        },
+      });
+      expect(mockCollectCandidateProviderCredentials).toHaveBeenCalledWith(
+        expect.objectContaining({
+          provider: expect.objectContaining({ id: provider }),
+          additionalEnvValues: {
+            [`${prefix}_PROTOCOL`]: 'responses',
+            [`${prefix}_API_KEY`]: '',
+          },
+        }),
+      );
+      expect(txDeleteWhere).toHaveBeenCalledWith({
+        and: [
+          { isNull: 'env.user_id' },
+          { column: 'env.name', values: [`${prefix}_API_KEY`] },
+        ],
+      });
+    },
+  );
+
   it('rejects saving a provider that has no API key anywhere', async () => {
     await expect(
       saveTaskModelProviderCommand(buildMockAuth(), {
