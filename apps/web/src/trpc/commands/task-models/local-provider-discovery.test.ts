@@ -5,6 +5,7 @@ import {
   discoverProviderModels,
   getRecommendedLocalProviderModels,
   LOCAL_TASK_MODEL_PROVIDER_IDS,
+  getOpenAiCompatibleProtocolWarning,
   qualifyProviderModel,
 } from './local-provider-discovery';
 
@@ -301,6 +302,227 @@ describe('qualifyProviderModel', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it.each([
+    'completed',
+    'failed',
+    'incomplete',
+    'truncated',
+    'invalid-arguments',
+    'missing-call-id',
+    'fresh-unsaved',
+    'unsaved-override',
+  ])(
+    'qualifies Responses-only HTTP endpoints through streamed tool output continuation: %s',
+    async (scenario) => {
+      const unsaved =
+        scenario === 'fresh-unsaved' || scenario === 'unsaved-override';
+      const outcome = unsaved ? 'completed' : scenario;
+      vi.unstubAllGlobals();
+      mockGetPersistedEnvironmentVariableValues.mockResolvedValue(
+        scenario === 'fresh-unsaved'
+          ? {}
+          : {
+              OPENAI_COMPATIBLE_NATIVE_PROTOCOL: unsaved
+                ? 'chat-completions'
+                : 'responses',
+            },
+      );
+      const requests: Array<{
+        url?: string;
+        body: Record<string, unknown>;
+        authorization?: string;
+      }> = [];
+      const call = {
+        type: 'function_call',
+        id: 'fc_ping',
+        call_id: 'call_ping',
+        name: 'ping',
+        arguments: '{}',
+      };
+      const server = createServer((request, response) => {
+        let body = '';
+        request.on('data', (chunk) => {
+          body += chunk;
+        });
+        request.on('end', () => {
+          const payload = JSON.parse(body);
+          requests.push({
+            url: request.url,
+            body: payload,
+            authorization: request.headers.authorization,
+          });
+          if (request.url !== '/prefix/v1/responses') {
+            response.writeHead(404).end();
+            return;
+          }
+          response.writeHead(200, { 'content-type': 'text/event-stream' });
+          const continuation = payload.tool_choice === 'none';
+          const event = continuation
+            ? {
+                type: `response.${outcome}`,
+                response: {
+                  status: outcome,
+                  output: [
+                    {
+                      type: 'message',
+                      content: [{ type: 'output_text', text: 'pong' }],
+                    },
+                  ],
+                },
+              }
+            : {
+                type: 'response.completed',
+                response: {
+                  status: 'completed',
+                  output: [
+                    // Reasoning models emit this first; it must not be replayed.
+                    { type: 'reasoning', id: 'rs_ping', summary: [] },
+                    {
+                      ...call,
+                      ...(outcome === 'invalid-arguments'
+                        ? { arguments: 'not-json' }
+                        : {}),
+                      ...(outcome === 'missing-call-id'
+                        ? { call_id: undefined }
+                        : {}),
+                    },
+                  ],
+                },
+              };
+          const stream = `: keepalive\r\n\r\ndata: ${JSON.stringify(event)}\r\n\r\n`;
+          response.write(stream.slice(0, 37));
+          setImmediate(() => response.end(stream.slice(37)));
+        });
+      });
+      server.listen(0, '127.0.0.1');
+      await once(server, 'listening');
+      try {
+        const address = server.address();
+        if (!address || typeof address === 'string')
+          throw new Error('No TCP address');
+        const result = await qualifyProviderModel({
+          provider: 'openai-compatible-native',
+          ...(unsaved ? { protocol: 'responses' as const } : {}),
+          modelId: 'openai-compatible-native/custom/model',
+          baseUrl: `http://127.0.0.1:${address.port}/prefix/v1`,
+        });
+        expect(result.success).toBe(outcome === 'completed');
+        expect(requests[0]).toMatchObject({
+          url: '/prefix/v1/responses',
+          body: {
+            model: 'custom/model',
+            store: false,
+            stream: true,
+            tool_choice: 'required',
+          },
+        });
+        expect(
+          requests.every((request) => request.authorization === undefined),
+        ).toBe(true);
+        if (!['invalid-arguments', 'missing-call-id'].includes(outcome)) {
+          expect(requests).toHaveLength(2);
+          expect(requests[1]?.body).toMatchObject({
+            input: [
+              expect.objectContaining({ role: 'user' }),
+              {
+                type: 'function_call',
+                call_id: 'call_ping',
+                name: 'ping',
+                arguments: '{}',
+              },
+              {
+                type: 'function_call_output',
+                call_id: 'call_ping',
+                output: 'pong',
+              },
+            ],
+            tool_choice: 'none',
+          });
+        }
+      } finally {
+        server.closeAllConnections();
+        await new Promise<void>((resolve, reject) =>
+          server.close((error) => (error ? reject(error) : resolve())),
+        );
+      }
+    },
+  );
+
+  it.each([
+    {
+      selected: 404,
+      other: 400,
+      expected:
+        /does not appear to serve Responses API.*does serve Chat Completions/,
+    },
+    {
+      selected: 405,
+      other: 404,
+      expected:
+        /does not appear to serve Responses API \(\/v1\/responses was not found\)\.$/,
+    },
+    { selected: 400, other: 404, expected: null },
+    { selected: 401, other: 404, expected: null },
+  ])(
+    'warns only when the selected protocol route is missing: $selected/$other',
+    async ({ selected, other, expected }) => {
+      fetchMock.mockImplementation(
+        async (url: string) =>
+          new Response('{}', {
+            status: url.endsWith('/v1/responses') ? selected : other,
+          }),
+      );
+
+      const warning = await getOpenAiCompatibleProtocolWarning({
+        provider: 'openai-compatible-native',
+        baseUrl: 'https://gateway.example/v1',
+        protocol: 'responses',
+      });
+      if (expected) expect(warning).toMatch(expected);
+      else expect(warning).toBeNull();
+      expect(fetchMock).toHaveBeenCalledWith(
+        'https://gateway.example/v1/responses',
+        expect.objectContaining({ method: 'POST', body: '{}' }),
+      );
+    },
+  );
+
+  it('skips the protocol check for providers without a protocol choice or when unreachable', async () => {
+    await expect(
+      getOpenAiCompatibleProtocolWarning({
+        provider: 'vllm',
+        baseUrl: 'https://vllm.example/v1',
+      }),
+    ).resolves.toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+    fetchMock.mockRejectedValue(new TypeError('fetch failed'));
+    await expect(
+      getOpenAiCompatibleProtocolWarning({
+        provider: 'openai-compatible',
+        baseUrl: 'https://gateway.example/v1',
+      }),
+    ).resolves.toBeNull();
+  });
+
+  it('reports an invalid saved protocol without throwing or sending a request', async () => {
+    mockGetPersistedEnvironmentVariableValues.mockResolvedValue({
+      OPENAI_COMPATIBLE_NATIVE_PROTOCOL: 'invalid',
+    });
+
+    await expect(
+      qualifyProviderModel({
+        provider: 'openai-compatible-native',
+        baseUrl: 'https://gateway.example/v1',
+        modelId: 'openai-compatible-native/model',
+      }),
+    ).resolves.toEqual({
+      success: false,
+      error:
+        'OpenAI-compatible API protocol must be chat-completions or responses.',
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('qualifies a provider model with a streaming tool request', async () => {

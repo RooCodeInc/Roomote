@@ -22,6 +22,7 @@ import {
 } from './task-models';
 import {
   OPENAI_COMPATIBLE_PROVIDER_ID,
+  OPENAI_COMPATIBLE_PROTOCOL_OPTIONS,
   buildOpenAiCompatibleProviderInstance,
   getOpenAiCompatibleProviderInstance,
   isOpenAiCompatibleProviderId,
@@ -1360,6 +1361,13 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     envVarLabel: 'Endpoint URL',
     additionalEnvFields: [
       {
+        envVarName: 'OPENAI_COMPATIBLE_PROTOCOL',
+        label: 'API protocol',
+        secret: false,
+        required: false,
+        options: OPENAI_COMPATIBLE_PROTOCOL_OPTIONS,
+      },
+      {
         envVarName: 'OPENAI_COMPATIBLE_API_KEY',
         label: 'API key',
         secret: true,
@@ -1596,6 +1604,13 @@ function buildOpenAiCompatibleSetupDescriptor(
     label: instance.label,
     envVarName: instance.baseUrlEnvVarName,
     additionalEnvFields: [
+      {
+        envVarName: instance.protocolEnvVarName,
+        label: 'API protocol',
+        secret: false,
+        required: false,
+        options: OPENAI_COMPATIBLE_PROTOCOL_OPTIONS,
+      },
       {
         envVarName: instance.apiKeyEnvVarName,
         label: 'API key',

@@ -26,6 +26,26 @@ import {
 import { writeOpenCodePluginSeedFixture } from './helpers/opencode-plugin-seed-fixture';
 
 describe('buildOpenCodeCliEnv', () => {
+  it('registers custom Responses and legacy Chat Completions connections independently', () => {
+    const env = buildOpenCodeCliEnv({
+      R_MODEL: 'openai-compatible-native/custom/model',
+      R_SMALL_MODEL: 'openai-compatible-legacy/model',
+      OPENAI_COMPATIBLE_NATIVE_PROTOCOL: 'responses',
+      OPENAI_COMPATIBLE_NATIVE_BASE_URL: 'https://gateway.example/prefix/v1',
+    });
+    const config = JSON.parse(env.OPENCODE_CONFIG_CONTENT!);
+    expect(config.provider['openai-compatible-native']).toMatchObject({
+      npm: '@ai-sdk/openai',
+      options: {
+        baseURL: 'https://gateway.example/prefix/v1',
+        apiKey: 'not-needed',
+      },
+      models: { 'custom/model': { name: 'custom/model' } },
+    });
+    expect(config.provider['openai-compatible-legacy'].npm).toBe(
+      '@ai-sdk/openai-compatible',
+    );
+  });
   it.each([undefined, '{}'])(
     'keeps the helper runtime role subset explicit with config content %s',
     (configContent) => {

@@ -2,6 +2,19 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.25.0 (2026-11-24)
+
+Roomote 1.25.0 lets you run tasks through custom Responses API gateways with native streaming and tool calling.
+
+### Highlights
+
+- Choose Responses API for an OpenAI-compatible connection in Models settings or first-run setup; no translation proxy is needed.
+- Existing connections keep Chat Completions by default, and changing protocols preserves connection and model IDs.
+
+### Minor changes
+
+- OpenAI-compatible connections now support a per-connection choice of Chat Completions or Responses API, including native streaming function calls and tool-output continuation for Responses-only gateways without a translation proxy. Choose the protocol in Models settings or first-run setup; existing connections keep Chat Completions, and connection and model IDs stay unchanged. Thanks to @Jianxiong-voidtech for reporting [#3727](https://github.com/RooCodeInc/Roomote/issues/3727).
+
 ## 1.24.0 (2026-11-22)
 
 Roomote 1.24.0 adds GPT-6.2 models, upgrades Jira connectivity, and strengthens account security.

@@ -11,6 +11,25 @@
 
 export const OPENAI_COMPATIBLE_PROVIDER_ID = 'openai-compatible' as const;
 
+export const OPENAI_COMPATIBLE_PROTOCOL_OPTIONS = [
+  { value: 'chat-completions', label: 'Chat Completions' },
+  { value: 'responses', label: 'Responses API' },
+] as const;
+export type OpenAiCompatibleProtocol =
+  (typeof OPENAI_COMPATIBLE_PROTOCOL_OPTIONS)[number]['value'];
+
+export function resolveOpenAiCompatibleProtocol(
+  value: string | undefined,
+): OpenAiCompatibleProtocol {
+  if (!value?.trim()) return 'chat-completions';
+  if (value.trim() === 'responses' || value.trim() === 'chat-completions') {
+    return value.trim() as OpenAiCompatibleProtocol;
+  }
+  throw new Error(
+    'OpenAI-compatible API protocol must be chat-completions or responses.',
+  );
+}
+
 const OPENAI_COMPATIBLE_NAMED_ID_PREFIX = `${OPENAI_COMPATIBLE_PROVIDER_ID}-`;
 
 /** Max characters accepted for a user-entered connection name before normalize. */
@@ -26,6 +45,7 @@ export type OpenAiCompatibleProviderInstance = {
   slug: string | null;
   label: string;
   baseUrlEnvVarName: string;
+  protocolEnvVarName: string;
   apiKeyEnvVarName: string;
   labelEnvVarName: string | null;
 };
@@ -251,6 +271,7 @@ export function buildOpenAiCompatibleProviderInstance(
       slug: null,
       label: options?.label?.trim() || 'OpenAI-compatible',
       baseUrlEnvVarName: 'OPENAI_COMPATIBLE_BASE_URL',
+      protocolEnvVarName: 'OPENAI_COMPATIBLE_PROTOCOL',
       apiKeyEnvVarName: 'OPENAI_COMPATIBLE_API_KEY',
       labelEnvVarName: null,
     };
@@ -264,6 +285,7 @@ export function buildOpenAiCompatibleProviderInstance(
     slug,
     label: `OpenAI-compatible (${label})`,
     baseUrlEnvVarName: `${OPENAI_COMPATIBLE_ENV_PREFIX}${envSegment}${OPENAI_COMPATIBLE_BASE_URL_ENV_SUFFIX}`,
+    protocolEnvVarName: `${OPENAI_COMPATIBLE_ENV_PREFIX}${envSegment}_PROTOCOL`,
     apiKeyEnvVarName: `${OPENAI_COMPATIBLE_ENV_PREFIX}${envSegment}${OPENAI_COMPATIBLE_API_KEY_ENV_SUFFIX}`,
     labelEnvVarName: `${OPENAI_COMPATIBLE_ENV_PREFIX}${envSegment}${OPENAI_COMPATIBLE_LABEL_ENV_SUFFIX}`,
   };
@@ -281,6 +303,51 @@ export function getOpenAiCompatibleProviderInstance(
     getOpenAiCompatibleProviderSlug(providerId),
     options,
   );
+}
+
+/**
+ * Translate catalog-template additional values onto a connection's env names.
+ * The primary URL is supplied separately by callers; preserve or omit a duplicate
+ * template URL explicitly so each save surface keeps its validation contract.
+ * Unknown values pass through for downstream credential validation to reject.
+ */
+export function remapOpenAiCompatibleAdditionalEnvValues(options: {
+  instance: OpenAiCompatibleProviderInstance;
+  additionalEnvValues?: Readonly<Record<string, string>>;
+  connectionName?: string;
+  templateBaseUrl: 'preserve' | 'omit';
+}): Record<string, string> {
+  const template = buildOpenAiCompatibleProviderInstance(null);
+  const envNames = new Map<string, string>();
+  for (const [field, templateName] of Object.entries(template)) {
+    const instanceName =
+      options.instance[field as keyof OpenAiCompatibleProviderInstance];
+    if (
+      field.endsWith('EnvVarName') &&
+      field !== 'baseUrlEnvVarName' &&
+      typeof templateName === 'string' &&
+      typeof instanceName === 'string'
+    ) {
+      envNames.set(templateName, instanceName);
+    }
+  }
+
+  const values: Record<string, string> = {};
+  if (options.instance.labelEnvVarName && options.connectionName?.trim()) {
+    values[options.instance.labelEnvVarName] = options.connectionName.trim();
+  }
+  for (const [name, value] of Object.entries(
+    options.additionalEnvValues ?? {},
+  )) {
+    if (
+      name === template.baseUrlEnvVarName &&
+      options.templateBaseUrl === 'omit'
+    ) {
+      continue;
+    }
+    values[envNames.get(name) ?? name] = value;
+  }
+  return values;
 }
 
 /**
@@ -347,6 +414,7 @@ export function getOpenAiCompatibleProviderEnvVarNames(
 
   return [
     instance.baseUrlEnvVarName,
+    instance.protocolEnvVarName,
     instance.apiKeyEnvVarName,
     ...(instance.labelEnvVarName ? [instance.labelEnvVarName] : []),
   ];

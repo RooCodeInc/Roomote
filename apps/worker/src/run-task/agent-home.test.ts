@@ -2133,6 +2133,28 @@ describe('generateOpenCodeConfig provider support', () => {
     });
   });
 
+  it('keeps native Responses transport when gateway mode withholds endpoint credentials', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'openai-compatible-native/model',
+        OPENAI_COMPATIBLE_NATIVE_PROTOCOL: 'responses',
+        R_INFERENCE_GATEWAY_URL: 'https://api.example.com/api/inference/',
+      },
+    });
+    expect(
+      JSON.parse(result.configContent).provider['openai-compatible-native'],
+    ).toMatchObject({
+      npm: '@ai-sdk/openai',
+      options: {
+        baseURL:
+          'https://api.example.com/api/inference/openai-compatible-native/v1',
+        apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
+      },
+      models: { model: { name: 'model' } },
+    });
+  });
+
   it('rebases gateway-backed compatible providers without an Ollama key', () => {
     const result = generateOpenCodeConfig({
       homeDir: createHomeDir(),

@@ -7,6 +7,9 @@ import {
   getSetupModelProvider,
   getSetupModelProviderAdditionalEnvFields,
   isOpenAiCompatibleProviderId,
+  getOpenAiCompatibleProviderInstance,
+  resolveOpenAiCompatibleProtocol,
+  type OpenAiCompatibleProtocol,
   isSetupModelProviderId,
   type SetupModelProviderId,
   type TaskModelMetadata,
@@ -59,6 +62,7 @@ export type LocalTaskModelProviderId =
   | `openai-compatible-${string}`;
 
 export type LocalProviderConnectionInput = {
+  protocol?: OpenAiCompatibleProtocol;
   baseUrl?: string;
   /** `null` marks a key the caller is clearing: the still-persisted value
    * must not serve as a fallback, because the save is about to delete it. */
@@ -66,6 +70,9 @@ export type LocalProviderConnectionInput = {
 };
 
 type LocalProviderConnection = {
+  /** Unvalidated: only qualification depends on it, so a bad value must not
+   * break model discovery. */
+  protocol: string | undefined;
   baseUrl: string;
   apiKey: string | null;
 };
@@ -312,8 +319,10 @@ async function resolveLocalProviderConnection(
   input?: LocalProviderConnectionInput,
 ): Promise<LocalProviderConnection | null> {
   const envNames = getLocalProviderConnectionEnv(provider);
+  const instance = getOpenAiCompatibleProviderInstance(provider);
   const persisted = await getPersistedEnvironmentVariableValues([
     envNames.baseUrl,
+    ...(instance ? [instance.protocolEnvVarName] : []),
     ...(envNames.apiKey ? [envNames.apiKey] : []),
   ]);
   const baseUrl =
@@ -341,6 +350,12 @@ async function resolveLocalProviderConnection(
 
   return {
     baseUrl,
+    protocol:
+      input?.protocol ??
+      (instance
+        ? process.env[instance.protocolEnvVarName]?.trim() ||
+          persisted[instance.protocolEnvVarName]
+        : undefined),
     apiKey:
       (clearingApiKey ? undefined : input?.apiKey?.trim()) ||
       (envNames.apiKey ? process.env[envNames.apiKey] : null) ||
@@ -526,6 +541,285 @@ export async function discoverProviderModels(
   return fetchLocalProviderModels(input.provider, connection);
 }
 
+/** `fetch` rejects with a TypeError when the endpoint is unreachable and with
+ * a Timeout/Abort DOMException when the request deadline passes. */
+function isQualificationNetworkError(error: unknown): boolean {
+  return (
+    error instanceof TypeError ||
+    (error instanceof Error &&
+      (error.name === 'TimeoutError' || error.name === 'AbortError'))
+  );
+}
+
+/** Servers may stream an empty string for a tool without parameters. */
+function isValidToolArguments(value: string | undefined): boolean {
+  if (!value?.trim()) return true;
+  try {
+    const args: unknown = JSON.parse(value);
+    return Boolean(args) && typeof args === 'object' && !Array.isArray(args);
+  } catch {
+    return false;
+  }
+}
+
+const OPENAI_COMPATIBLE_PROTOCOL_ROUTES = {
+  'chat-completions': {
+    path: '/v1/chat/completions',
+    label: 'Chat Completions',
+  },
+  responses: { path: '/v1/responses', label: 'Responses API' },
+} as const satisfies Record<
+  OpenAiCompatibleProtocol,
+  { path: string; label: string }
+>;
+
+/**
+ * Checks, without needing a model, whether the endpoint serves the selected
+ * protocol's route. An empty request fails validation on a server that
+ * implements the route and returns 404/405 on one that does not; any other
+ * outcome (auth, network, timeout) is inconclusive and reports nothing.
+ */
+export async function getOpenAiCompatibleProtocolWarning(
+  input: { provider: LocalTaskModelProviderId } & LocalProviderConnectionInput,
+): Promise<string | null> {
+  if (!getOpenAiCompatibleProviderInstance(input.provider)) return null;
+  try {
+    const connection = await resolveLocalProviderConnection(
+      input.provider,
+      input,
+    );
+    if (!connection) return null;
+    const selected = resolveOpenAiCompatibleProtocol(connection.protocol);
+    const isMissing = async (protocol: OpenAiCompatibleProtocol) => {
+      const response = await fetch(
+        getLocalProviderBaseUrl(
+          connection.baseUrl,
+          OPENAI_COMPATIBLE_PROTOCOL_ROUTES[protocol].path,
+        ),
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...buildLocalProviderHeaders(connection),
+          },
+          body: '{}',
+          signal: AbortSignal.timeout(LOCAL_PROVIDER_REQUEST_TIMEOUT_MS),
+        },
+      );
+      await response.body?.cancel();
+      return response.status === 404 || response.status === 405;
+    };
+    if (!(await isMissing(selected))) return null;
+    const other: OpenAiCompatibleProtocol =
+      selected === 'responses' ? 'chat-completions' : 'responses';
+    const { path, label } = OPENAI_COMPATIBLE_PROTOCOL_ROUTES[selected];
+    const suggestion = (await isMissing(other).catch(() => true))
+      ? ''
+      : ` It does serve ${OPENAI_COMPATIBLE_PROTOCOL_ROUTES[other].label}; switch the API protocol if tasks fail.`;
+    return `This endpoint does not appear to serve ${label} (${path} was not found).${suggestion}`;
+  } catch {
+    return null;
+  }
+}
+
+const responsesEventSchema = z.object({
+  type: z.string(),
+  response: z
+    .object({
+      status: z.string().optional(),
+      output: z
+        .array(
+          z
+            .object({
+              type: z.string(),
+              call_id: z.string().optional(),
+              name: z.string().optional(),
+              arguments: z.string().optional(),
+              content: z
+                .array(
+                  z.object({ type: z.string(), text: z.string().optional() }),
+                )
+                .optional(),
+            })
+            .passthrough(),
+        )
+        .optional(),
+    })
+    .optional(),
+});
+
+async function readQualificationEvents(response: Response): Promise<unknown[]> {
+  if (
+    !response.headers.get('content-type')?.includes('text/event-stream') ||
+    !response.body
+  ) {
+    throw new Error(
+      'The provider did not return a streaming response. Check the selected API protocol and streaming support.',
+    );
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let text = '';
+  try {
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      text += decoder.decode(chunk.value, { stream: true });
+      if (text.length > 1_000_000)
+        throw new Error('The qualification stream exceeded its size limit.');
+    }
+    text += decoder.decode();
+  } finally {
+    await reader.cancel();
+    reader.releaseLock();
+  }
+  return text.split(/\r?\n\r?\n/).flatMap((event) => {
+    const data = event
+      .split(/\r?\n/)
+      .filter((line) => line.startsWith('data:'))
+      .map((line) => line.slice(5).trimStart())
+      .join('\n');
+    if (!data || data.trim() === '[DONE]') return [];
+    try {
+      return [JSON.parse(data) as unknown];
+    } catch {
+      return [];
+    }
+  });
+}
+
+async function qualifyResponsesModel(
+  provider: LocalTaskModelProviderId,
+  modelId: string,
+  connection: LocalProviderConnection,
+): Promise<{ success: true } | { success: false; error: string }> {
+  const prompt = {
+    role: 'user',
+    content: 'Call ping, then reply with the tool result.',
+  };
+  const request = async (input: unknown[], toolChoice: 'required' | 'none') => {
+    const response = await fetch(
+      getLocalProviderBaseUrl(connection.baseUrl, '/v1/responses'),
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...buildLocalProviderHeaders(connection),
+        },
+        body: JSON.stringify({
+          model: modelId.replace(`${provider}/`, ''),
+          stream: true,
+          store: false,
+          input,
+          tool_choice: toolChoice,
+          tools: [
+            {
+              type: 'function',
+              name: 'ping',
+              description: 'Returns a short health-check response.',
+              parameters: {
+                type: 'object',
+                properties: {},
+                additionalProperties: false,
+              },
+              strict: true,
+            },
+          ],
+        }),
+        signal: AbortSignal.timeout(LOCAL_PROVIDER_REQUEST_TIMEOUT_MS),
+      },
+    );
+    if (!response.ok)
+      throw new Error(
+        `Responses API (/v1/responses): ${await getQualificationError(provider, response)}`,
+      );
+    const events = await readQualificationEvents(response);
+    if (
+      events.some((event) => {
+        const parsed = responsesEventSchema.safeParse(event);
+        return (
+          parsed.success &&
+          ['error', 'response.failed', 'response.incomplete'].includes(
+            parsed.data.type,
+          )
+        );
+      })
+    )
+      throw new Error('Responses API stream failed or was incomplete.');
+    // The completed event contains the assembled function arguments and output,
+    // independent of arbitrary network and argument-delta fragmentation.
+    const completed = events
+      .map((event) => responsesEventSchema.safeParse(event))
+      .find(
+        (event) => event.success && event.data.type === 'response.completed',
+      );
+    if (
+      !completed?.success ||
+      completed.data.response?.status !== 'completed'
+    ) {
+      throw new Error('Responses API stream did not complete.');
+    }
+    return completed.data.response.output ?? [];
+  };
+  try {
+    const output = await request([prompt], 'required');
+    const calls = output.filter((item) => item.type === 'function_call');
+    if (
+      !calls.length ||
+      calls.some((call) => call.name !== 'ping' || !call.call_id)
+    ) {
+      throw new Error(
+        'The model streamed a response but did not call the required tool with a call ID.',
+      );
+    }
+    if (calls.some((call) => !isValidToolArguments(call.arguments)))
+      throw new Error('The model returned invalid tool arguments.');
+    const continuation = await request(
+      [
+        prompt,
+        // Replay only the function calls, without their item IDs. Reasoning
+        // items and item IDs reference server-side state that does not exist
+        // with `store: false`, so endpoints reject them when sent back.
+        ...calls.map((call) => ({
+          type: 'function_call',
+          call_id: call.call_id,
+          name: call.name,
+          arguments: call.arguments?.trim() || '{}',
+        })),
+        ...calls.map((call) => ({
+          type: 'function_call_output',
+          call_id: call.call_id,
+          output: 'pong',
+        })),
+      ],
+      'none',
+    );
+    if (
+      !continuation.some(
+        (item) =>
+          item.type === 'message' &&
+          item.content?.some(
+            (part) => part.type === 'output_text' && part.text?.trim(),
+          ),
+      )
+    ) {
+      throw new Error(
+        'Responses API tool output continuation completed without a text response.',
+      );
+    }
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: isQualificationNetworkError(error)
+        ? getLocalProviderNetworkError(provider)
+        : error instanceof Error
+          ? error.message
+          : 'Responses API qualification failed.',
+    };
+  }
+}
+
 export async function qualifyProviderModel(
   input: {
     provider: LocalTaskModelProviderId;
@@ -549,6 +843,9 @@ export async function qualifyProviderModel(
   }
 
   try {
+    if (resolveOpenAiCompatibleProtocol(connection.protocol) === 'responses') {
+      return await qualifyResponsesModel(input.provider, modelId, connection);
+    }
     const response = await fetch(
       getLocalProviderBaseUrl(connection.baseUrl, '/v1/chat/completions'),
       {
@@ -583,53 +880,9 @@ export async function qualifyProviderModel(
       };
     }
 
-    if (!response.headers.get('content-type')?.includes('text/event-stream')) {
-      return {
-        success: false,
-        error:
-          'The provider returned a non-streaming response. Check OpenAI-compatible streaming support.',
-      };
-    }
-
-    const reader = response.body?.getReader();
-    if (!reader) {
-      return {
-        success: false,
-        error:
-          'The provider accepted the request but did not return a streaming response body.',
-      };
-    }
-
-    const decoder = new TextDecoder();
-    let streamText = '';
-    try {
-      while (true) {
-        const chunk = await reader.read();
-        if (chunk.done) {
-          break;
-        }
-        streamText += decoder.decode(chunk.value, { stream: true });
-      }
-    } finally {
-      reader.releaseLock();
-    }
-
     const toolNames = new Map<string, string>();
-    for (const event of streamText.split(/\r?\n\r?\n/)) {
-      const data = event
-        .split(/\r?\n/)
-        .filter((line) => line.startsWith('data:'))
-        .map((line) => line.slice(5).trimStart())
-        .join('\n');
-      if (!data || data.trim() === '[DONE]') continue;
-
-      let payload: unknown;
-      try {
-        payload = JSON.parse(data);
-      } catch {
-        continue;
-      }
-      const chunk = qualificationChunkSchema.safeParse(payload);
+    for (const event of await readQualificationEvents(response)) {
+      const chunk = qualificationChunkSchema.safeParse(event);
       if (!chunk.success) continue;
 
       chunk.data.choices.forEach((choice, choiceOffset) => {
@@ -652,10 +905,13 @@ export async function qualifyProviderModel(
       };
     }
     return { success: true };
-  } catch {
+  } catch (error) {
     return {
       success: false,
-      error: getLocalProviderNetworkError(input.provider),
+      error:
+        error instanceof Error && !isQualificationNetworkError(error)
+          ? error.message
+          : getLocalProviderNetworkError(input.provider),
     };
   }
 }

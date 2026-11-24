@@ -77,6 +77,7 @@ import {
   SETUP_MODEL_PROVIDER_CATALOG,
   buildOpenAiCompatibleProviderId,
   buildOpenAiCompatibleProviderInstance,
+  remapOpenAiCompatibleAdditionalEnvValues,
   isOpenAiCompatibleProviderId,
   normalizeOpenAiCompatibleConnectionSlug,
   isAutoProvisionedComputeArtifactField,
@@ -1582,21 +1583,12 @@ export async function saveSetupNewModelConfigCommand(
     const instance = buildOpenAiCompatibleProviderInstance(slug, {
       label: input.connectionName?.trim() || slug,
     });
-    const remappedAdditional: Record<string, string> = {};
-    if (instance.labelEnvVarName && input.connectionName?.trim()) {
-      remappedAdditional[instance.labelEnvVarName] =
-        input.connectionName.trim();
-    }
-    for (const [name, value] of Object.entries(
-      input.additionalEnvValues ?? {},
-    )) {
-      if (name === 'OPENAI_COMPATIBLE_API_KEY') {
-        remappedAdditional[instance.apiKeyEnvVarName] = value;
-        continue;
-      }
-      remappedAdditional[name] = value;
-    }
-    additionalEnvValues = remappedAdditional;
+    additionalEnvValues = remapOpenAiCompatibleAdditionalEnvValues({
+      instance,
+      connectionName: input.connectionName,
+      additionalEnvValues: input.additionalEnvValues,
+      templateBaseUrl: 'preserve',
+    });
   } else if (isOpenAiCompatibleProviderId(providerId)) {
     // Already named — keep as-is.
   }
