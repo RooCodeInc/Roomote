@@ -475,6 +475,7 @@ export function ComputeProviderSection({
               Not configured.{' '}
               <button
                 type="button"
+                aria-label={`Set it up for ${provider.label}`}
                 className="underline underline-offset-4 hover:text-accent-foreground cursor-pointer"
                 onClick={() => setExpanded(true)}
               >
