@@ -276,6 +276,7 @@ describe('GitHub PR review check lifecycle', () => {
     mockFindFirstLinkage.mockResolvedValue({
       githubCheckRunId: 20,
       repository: 'owner/repo',
+      prNumber: 42,
     });
 
     await markGithubPrReviewCheckInProgress({
@@ -290,8 +291,14 @@ describe('GitHub PR review check lifecycle', () => {
         check_run_id: 20,
         status: 'in_progress',
         details_url: 'https://roomote.test/task/task-1',
+        request: { signal: expect.any(AbortSignal) },
       }),
     );
+    expect(mockGetTokenCheckRun).toHaveBeenCalledWith(
+      'token',
+      expect.objectContaining({ request: { signal: expect.any(AbortSignal) } }),
+    );
+    expect(mockReleaseRedisLock).toHaveBeenCalledOnce();
   });
 
   it.each([
@@ -301,6 +308,7 @@ describe('GitHub PR review check lifecycle', () => {
     mockFindFirstLinkage.mockResolvedValue({
       githubCheckRunId: 20,
       repository: 'owner/repo',
+      prNumber: 42,
     });
     mockGetTokenCheckRun.mockResolvedValueOnce({
       data: { status, external_id: externalId },
@@ -313,6 +321,39 @@ describe('GitHub PR review check lifecycle', () => {
     });
 
     expect(mockUpdateCheckRun).not.toHaveBeenCalled();
+    expect(mockGetTokenCheckRun).toHaveBeenCalledOnce();
+    expect(mockReleaseRedisLock).toHaveBeenCalledOnce();
+  });
+
+  it('does not dispatch startup after losing its lease during the check read', async () => {
+    vi.useFakeTimers();
+    mockFindFirstLinkage.mockResolvedValue({
+      githubCheckRunId: 20,
+      repository: 'owner/repo',
+      prNumber: 42,
+    });
+    mockRenewRedisLock.mockResolvedValueOnce('lost');
+    mockGetTokenCheckRun.mockImplementationOnce(async () => {
+      await vi.advanceTimersByTimeAsync(40_000);
+      return {
+        data: { external_id: 'roomote-review:2', status: 'queued' },
+      };
+    });
+
+    try {
+      await markGithubPrReviewCheckInProgress({
+        taskId: 'task-1',
+        runId: 2,
+        gitHubToken: 'token',
+      });
+      expect(
+        mockGetTokenCheckRun.mock.calls[0]?.[1].request.signal.aborted,
+      ).toBe(true);
+      expect(mockUpdateCheckRun).not.toHaveBeenCalled();
+      expect(mockReleaseRedisLock).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('transfers an in-progress check from the exited run to its fallback', async () => {
