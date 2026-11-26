@@ -99,7 +99,12 @@ const {
       },
     },
     mockGetConfigVersion: vi.fn(
-      ({ version }: { environmentId: string; version: number }) =>
+      ({
+        version,
+      }: {
+        environmentId: string;
+        version: number;
+      }): Promise<(typeof versionDetails)[1 | 2] | null> =>
         Promise.resolve(versionDetails[version as 1 | 2] ?? null),
     ),
     mockRouterPush: vi.fn(),
@@ -422,6 +427,67 @@ describe('EditEnvironmentPage', () => {
       });
     });
   });
+
+  it.each([
+    ['current', 'rejected'],
+    ['current', 'missing'],
+    ['historical', 'rejected'],
+    ['historical', 'missing'],
+  ] as const)(
+    'preserves a %s draft after a %s version read and allows selecting again',
+    async (origin, failure) => {
+      const queryClient = new QueryClient({
+        defaultOptions: { queries: { retry: false } },
+      });
+      render(
+        <QueryClientProvider client={queryClient}>
+          <EditEnvironmentPage environmentId="env-1" />
+        </QueryClientProvider>,
+      );
+      await screen.findByRole('combobox', { name: 'Version' });
+      const versionSelect = () =>
+        screen.getByRole('combobox', { name: 'Version' });
+      if (origin === 'historical') {
+        fireEvent.change(versionSelect(), { target: { value: '1' } });
+        await waitFor(() => expect(versionSelect()).not.toBeDisabled());
+        expect(versionSelect()).toHaveValue('1');
+      }
+      fireEvent.click(screen.getByRole('button', { name: 'Mock edit YAML' }));
+      const draft = screen.getByRole('textbox', { name: 'YAML content' });
+      const mountId = screen.getByTestId('yaml-editor-mount-id').textContent;
+      const editedYaml = configToYaml(mockYamlEditorState.editedConfig);
+      expect(draft).toHaveValue(editedYaml);
+
+      if (failure === 'rejected') {
+        mockGetConfigVersion.mockRejectedValueOnce(
+          new Error('Version offline'),
+        );
+      } else {
+        mockGetConfigVersion.mockResolvedValueOnce(null);
+      }
+      fireEvent.change(versionSelect(), { target: { value: '2' } });
+      await waitFor(() => expect(versionSelect()).not.toBeDisabled());
+
+      expect(versionSelect()).toHaveValue(
+        origin === 'historical' ? '1' : 'current',
+      );
+      expect(draft).toBeInTheDocument();
+      expect(draft).toHaveValue(editedYaml);
+      expect(screen.getByTestId('yaml-editor-mount-id')).toHaveTextContent(
+        mountId!,
+      );
+      expect(mockUpdateEnvironment).not.toHaveBeenCalled();
+
+      fireEvent.change(versionSelect(), { target: { value: '2' } });
+      await waitFor(() => expect(versionSelect()).toHaveValue('2'));
+      expect(screen.getByTestId('yaml-editor-mount-id').textContent).not.toBe(
+        mountId,
+      );
+      expect(screen.getByRole('textbox', { name: 'YAML content' })).toHaveValue(
+        configToYaml(mockYamlEditorState.editedConfig),
+      );
+    },
+  );
 
   it('loads a saved version into the YAML editor and restores the current config', async () => {
     mockValidateEnvironmentConfig.mockResolvedValue({

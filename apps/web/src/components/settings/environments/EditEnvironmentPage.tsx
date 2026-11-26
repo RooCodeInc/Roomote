@@ -251,11 +251,10 @@ export function EditEnvironmentPage({
       return;
     }
 
-    setWarnings([]);
-    setPendingConfig(null);
-    setSelectedVersionValue(value);
-
     if (value === CURRENT_VERSION_VALUE) {
+      setWarnings([]);
+      setPendingConfig(null);
+      setSelectedVersionValue(value);
       setLoadedVersionYaml(null);
       setEditorResetKey((currentKey) => currentKey + 1);
       return;
@@ -273,12 +272,12 @@ export function EditEnvironmentPage({
 
       if (!version) {
         toast.error('Environment version not found');
-        setSelectedVersionValue(CURRENT_VERSION_VALUE);
-        setLoadedVersionYaml(null);
-        setEditorResetKey((currentKey) => currentKey + 1);
         return;
       }
 
+      setWarnings([]);
+      setPendingConfig(null);
+      setSelectedVersionValue(value);
       setLoadedVersionYaml(configToYaml(version.config));
       setEditorResetKey((currentKey) => currentKey + 1);
     } catch (error) {
@@ -287,9 +286,6 @@ export function EditEnvironmentPage({
           ? error.message
           : 'Failed to load environment version',
       );
-      setSelectedVersionValue(CURRENT_VERSION_VALUE);
-      setLoadedVersionYaml(null);
-      setEditorResetKey((currentKey) => currentKey + 1);
     } finally {
       setIsLoadingVersion(false);
     }
