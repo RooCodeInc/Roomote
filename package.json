@@ -156,7 +156,7 @@
       "moment": "2.31.0",
       "postcss": "8.5.23",
       "sharp": "0.35.5",
-      "hono": "4.13.16",
+      "hono": "4.13.18",
       "vitest": "4.1.12",
       "@ai-sdk/provider-utils@4": "4.0.33",
       "toml": "5.0.1",

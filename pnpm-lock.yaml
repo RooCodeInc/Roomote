@@ -72,7 +72,7 @@ overrides:
   moment: 2.31.0
   postcss: 8.5.23
   sharp: 0.35.5
-  hono: 4.13.16
+  hono: 4.13.18
   vitest: 4.1.12
   '@ai-sdk/provider-utils@4': 4.0.33
   toml: 5.0.1
@@ -162,10 +162,10 @@ importers:
         version: 3.1000.0
       '@hono/node-server':
         specifier: 2.1.6
-        version: 2.1.6(hono@4.13.16)
+        version: 2.1.6(hono@4.13.18)
       '@hono/trpc-server':
         specifier: ^0.4.2
-        version: 0.4.2(@trpc/server@11.15.0(typescript@5.9.3))(hono@4.13.16)
+        version: 0.4.2(@trpc/server@11.15.0(typescript@5.9.3))(hono@4.13.18)
       '@modelcontextprotocol/sdk':
         specifier: 1.32.0
         version: 1.32.0(@cfworker/json-schema@4.1.1)(zod@4.6.7)
@@ -239,8 +239,8 @@ importers:
         specifier: 3.4.17
         version: 3.4.17
       hono:
-        specifier: 4.13.16
-        version: 4.13.16
+        specifier: 4.13.18
+        version: 4.13.18
       jose:
         specifier: ^6.2.3
         version: 6.2.3
@@ -286,13 +286,13 @@ importers:
         version: 6.16.4(@bull-board/ui@6.16.4)
       '@bull-board/hono':
         specifier: ^6.16.4
-        version: 6.16.4(hono@4.13.16)
+        version: 6.16.4(hono@4.13.18)
       '@bull-board/ui':
         specifier: ^6.16.4
         version: 6.16.4
       '@hono/node-server':
         specifier: 2.1.6
-        version: 2.1.6(hono@4.13.16)
+        version: 2.1.6(hono@4.13.18)
       '@roomote/cloud-agents':
         specifier: workspace:^
         version: link:../../packages/cloud-agents
@@ -339,8 +339,8 @@ importers:
         specifier: ^5.78.0
         version: 5.78.0
       hono:
-        specifier: 4.13.16
-        version: 4.13.16
+        specifier: 4.13.18
+        version: 4.13.18
       ioredis:
         specifier: 5.10.1
         version: 5.10.1
@@ -770,8 +770,8 @@ importers:
         specifier: ^6.0.0
         version: 6.0.2
       cron-parser:
-        specifier: 5.6.1
-        version: 5.6.1
+        specifier: 5.10.6
+        version: 5.10.6
       cronstrue:
         specifier: ^3.24.0
         version: 3.24.0
@@ -958,7 +958,7 @@ importers:
     dependencies:
       '@hono/node-server':
         specifier: 2.1.6
-        version: 2.1.6(hono@4.13.16)
+        version: 2.1.6(hono@4.13.18)
       '@modelcontextprotocol/sdk':
         specifier: 1.32.0
         version: 1.32.0(@cfworker/json-schema@4.1.1)(zod@4.6.7)
@@ -1005,8 +1005,8 @@ importers:
         specifier: 9.6.1
         version: 9.6.1
       hono:
-        specifier: 4.13.16
-        version: 4.13.16
+        specifier: 4.13.18
+        version: 4.13.18
       http-proxy:
         specifier: ^1.18.1
         version: 1.18.1
@@ -1216,8 +1216,8 @@ importers:
         specifier: ^5.78.0
         version: 5.78.0
       cron-parser:
-        specifier: 5.6.1
-        version: 5.6.1
+        specifier: 5.10.6
+        version: 5.10.6
       dompurify:
         specifier: 3.4.17
         version: 3.4.17
@@ -1669,8 +1669,8 @@ importers:
         specifier: ^5.78.0
         version: 5.78.0
       cron-parser:
-        specifier: 5.6.1
-        version: 5.6.1
+        specifier: 5.10.6
+        version: 5.10.6
       htmlparser2:
         specifier: 8.0.2
         version: 8.0.2
@@ -2316,7 +2316,7 @@ packages:
   '@bull-board/hono@6.16.4':
     resolution: {integrity: sha512-lVR0WF06cU3eLDsKWtEYG2jE/ESi3q2dIaVzmcht0aIakAL/PykFZG3G+29lQFtPEp7LtD8DYMICUtwEgoSJ4Q==}
     peerDependencies:
-      hono: 4.13.16
+      hono: 4.13.18
 
   '@bull-board/ui@6.16.4':
     resolution: {integrity: sha512-5Yv+4g0rDvBBq2RxaUewSEwD8ywvqCX6lKlzPM5Aaf0+4cxGoENQRZNcBaAIKX4+fAzAbdVB4VGP4NUgtx5LVg==}
@@ -2882,14 +2882,14 @@ packages:
     resolution: {integrity: sha512-p/KH9MnfNcsm3sR6x4lNgm5j+QN4Et8srKredl9DZfXiyZ1UQ3aQ2YVpFLbqktYN5JI+DB+VZFKM2PqE5hLKjQ==}
     engines: {node: '>=20'}
     peerDependencies:
-      hono: 4.13.16
+      hono: 4.13.18
 
   '@hono/trpc-server@0.4.2':
     resolution: {integrity: sha512-3TDrc42CZLgcTFkXQba+y7JlRWRiyw1AqhLqztWyNS2IFT+3bHld0lxKdGBttCtGKHYx0505dM67RMazjhdZqw==}
     engines: {node: '>=16.0.0'}
     peerDependencies:
       '@trpc/server': ^10.10.0 || >11.0.0-rc
-      hono: 4.13.16
+      hono: 4.13.18
 
   '@hookform/resolvers@5.2.2':
     resolution: {integrity: sha512-A/IxlMLShx3KjV/HeTcTfaMxdwy690+L/ZADoeaTltLx+CVuzkeVIPuybK3jrRfw7YZnmdKsVVHAlEPIAEUNlA==}
@@ -7637,8 +7637,8 @@ packages:
     engines: {node: '>=12.0.0'}
     deprecated: v4 is no longer maintained, upgrade to v5
 
-  cron-parser@5.6.1:
-    resolution: {integrity: sha512-QBm4o1PwZiuY7KFbVvW7FLC8bozy7YWzv+Fz6KRS7sQghzcbDZCGxr/Bc5b6TQreAoSwuWVP491dIcK0THCX6A==}
+  cron-parser@5.10.6:
+    resolution: {integrity: sha512-kpoxgQyveO1l29nw+FWdvmotyV7eOSzGHQpxiXOEZIDOjqO1iR6kfgJ0PVHTuV26uBemKq3ppzma7dHFAG7viw==}
     engines: {node: '>=18'}
 
   cronstrue@3.24.0:
@@ -8892,8 +8892,8 @@ packages:
     resolution: {integrity: sha512-eSmmWE5bZTK2Nou4g0AI3zZ9rswp7GRKoKXS1BLUkvPviOqs4YTN1djQIqrXy9k5gEtdLPy86JjRwsNM9tnDcA==}
     engines: {node: '>=0.10.0'}
 
-  hono@4.13.16:
-    resolution: {integrity: sha512-AOLOEhvrV+iH92xXCnFr/5+3KjPKcI3xP63XJtX5spAnkznPdHijlIsUTpi7/9EhWqrTCekw5c5zh1K+YsVw7A==}
+  hono@4.13.18:
+    resolution: {integrity: sha512-H9q/E1XizaWstJxUW881dmLxEj+t/TrGGnyxINkm4+sK0qUwsMtFdo2BWI9Vs3cIS19MU6b6iCijoUoEf4f3DA==}
     engines: {node: '>=16.9.0'}
 
   hotkeys-js@4.0.2:
@@ -13198,12 +13198,12 @@ snapshots:
       '@bull-board/ui': 6.16.4
       redis-info: 3.1.0
 
-  '@bull-board/hono@6.16.4(hono@4.13.16)':
+  '@bull-board/hono@6.16.4(hono@4.13.18)':
     dependencies:
       '@bull-board/api': 6.16.4(@bull-board/ui@6.16.4)
       '@bull-board/ui': 6.16.4
       ejs: 3.1.10
-      hono: 4.13.16
+      hono: 4.13.18
 
   '@bull-board/ui@6.16.4':
     dependencies:
@@ -13917,14 +13917,14 @@ snapshots:
 
   '@hey-api/types@0.1.4': {}
 
-  '@hono/node-server@2.1.6(hono@4.13.16)':
+  '@hono/node-server@2.1.6(hono@4.13.18)':
     dependencies:
-      hono: 4.13.16
+      hono: 4.13.18
 
-  '@hono/trpc-server@0.4.2(@trpc/server@11.15.0(typescript@5.9.3))(hono@4.13.16)':
+  '@hono/trpc-server@0.4.2(@trpc/server@11.15.0(typescript@5.9.3))(hono@4.13.18)':
     dependencies:
       '@trpc/server': 11.15.0(typescript@5.9.3)
-      hono: 4.13.16
+      hono: 4.13.18
 
   '@hookform/resolvers@5.2.2(react-hook-form@7.60.0(react@19.2.4))':
     dependencies:
@@ -14235,7 +14235,7 @@ snapshots:
 
   '@modelcontextprotocol/sdk@1.32.0(@cfworker/json-schema@4.1.1)(zod@4.6.7)':
     dependencies:
-      '@hono/node-server': 2.1.6(hono@4.13.16)
+      '@hono/node-server': 2.1.6(hono@4.13.18)
       ajv: 8.20.0
       ajv-formats: 3.0.1(ajv@8.20.0)
       content-type: 1.0.5
@@ -14245,7 +14245,7 @@ snapshots:
       eventsource-parser: 3.1.1
       express: 5.2.1
       express-rate-limit: 8.5.2(express@5.2.1)
-      hono: 4.13.16
+      hono: 4.13.18
       jose: 6.2.4
       json-schema-typed: 8.0.2
       pkce-challenge: 5.0.1
@@ -18617,7 +18617,7 @@ snapshots:
     dependencies:
       luxon: 3.7.2
 
-  cron-parser@5.6.1:
+  cron-parser@5.10.6:
     dependencies:
       luxon: 3.7.2
 
@@ -20115,7 +20115,7 @@ snapshots:
     dependencies:
       parse-passwd: 1.0.0
 
-  hono@4.13.16: {}
+  hono@4.13.18: {}
 
   hotkeys-js@4.0.2: {}
 
