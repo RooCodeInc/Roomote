@@ -36,7 +36,7 @@
     "@roomote/types": "workspace:^",
     "@sentry/node": "10.45.0",
     "bullmq": "^5.78.0",
-    "hono": "4.13.16",
+    "hono": "4.13.18",
     "ioredis": "^5.10.1",
     "jsdom": "26.1.0",
     "zod": "^4.6.6"
